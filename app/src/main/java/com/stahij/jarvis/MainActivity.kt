@@ -150,7 +150,11 @@ class MainActivity : Activity() {
                 checkForUpdates(manual = true)
                 true
             }
-            menu.add("Модель").setOnMenuItemClickListener {
+            menu.add("Скачать модель Qwen (1,1 ГБ)").setOnMenuItemClickListener {
+                confirmQwenDownload()
+                true
+            }
+            menu.add("Выбрать GGUF-файл").setOnMenuItemClickListener {
                 chooseModel()
                 true
             }
@@ -250,6 +254,107 @@ class MainActivity : Activity() {
                         .setMessage(e.message ?: "Неизвестная ошибка")
                         .setPositiveButton("Закрыть", null)
                         .show()
+                }
+            }
+        }
+    }
+
+    private fun confirmQwenDownload() {
+        if (modelFile.exists() && modelFile.length() > 500L * 1024L * 1024L) {
+            AlertDialog.Builder(this)
+                .setTitle("Модель уже загружена")
+                .setMessage("Заменить текущую модель Qwen? Это потребует повторной загрузки примерно 1,1 ГБ.")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Заменить") { _, _ -> downloadQwenModel() }
+                .show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Загрузить мозг Jarvis")
+            .setMessage("Qwen2.5-Coder-1.5B-Instruct Q4_0. Размер около 1,1 ГБ. Модель будет храниться в памяти приложения и работать локально, без отправки запросов внешним ИИ.")
+            .setNegativeButton("Позже", null)
+            .setPositiveButton("Загрузить") { _, _ -> downloadQwenModel() }
+            .show()
+    }
+
+    private fun downloadQwenModel() {
+        sendButton.isEnabled = false
+        status.text = "ПОДГОТОВКА ЗАГРУЗКИ QWEN..."
+        executor.execute {
+            try {
+                val directory = modelFile.parentFile ?: throw IllegalStateException("Нет папки моделей")
+                if (!directory.exists() && !directory.mkdirs()) {
+                    throw IllegalStateException("Не удалось создать папку модели")
+                }
+                val part = File(directory, "qwen-coder.gguf.part")
+                val url = java.net.URL(QWEN_MODEL_URL)
+                var offset = if (part.exists()) part.length() else 0L
+                val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 20000
+                    readTimeout = 90000
+                    instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", "Jarvis-Android")
+                    if (offset > 0L) setRequestProperty("Range", "bytes=$offset-")
+                }
+                try {
+                    val code = connection.responseCode
+                    if (code !in 200..299) throw IllegalStateException("Сервер модели вернул HTTP $code")
+                    if (offset > 0L && code != 206) {
+                        part.delete()
+                        offset = 0L
+                    }
+                    val total = if (code == 206) {
+                        val range = connection.getHeaderField("Content-Range")
+                        range?.substringAfterLast('/')?.toLongOrNull()?.takeIf { it > 0L }
+                    } else connection.contentLengthLong.takeIf { it > 0L }
+                    connection.inputStream.use { source ->
+                        java.io.FileOutputStream(part, offset > 0L).use { target ->
+                            val buffer = ByteArray(256 * 1024)
+                            var downloaded = offset
+                            var lastUpdate = 0L
+                            while (true) {
+                                val count = source.read(buffer)
+                                if (count < 0) break
+                                target.write(buffer, 0, count)
+                                downloaded += count
+                                val now = System.currentTimeMillis()
+                                if (now - lastUpdate > 700L) {
+                                    lastUpdate = now
+                                    val percent = total?.let { ((downloaded * 100L) / it).coerceIn(0L, 100L) }
+                                    runOnUiThread {
+                                        status.text = if (percent != null) "СКАЧИВАЮ QWEN • $percent%"
+                                            else "СКАЧИВАЮ QWEN • ${downloaded / (1024L * 1024L)} МБ"
+                                    }
+                                }
+                            }
+                            target.fd.sync()
+                        }
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+                if (part.length() < 500L * 1024L * 1024L) {
+                    throw IllegalStateException("Загрузка неполная: файл меньше ожидаемого размера. Можно повторить — загрузка продолжится.")
+                }
+                val magic = ByteArray(4)
+                part.inputStream().use { if (it.read(magic) != 4) throw IllegalStateException("Не удалось проверить GGUF-файл") }
+                if (String(magic, Charsets.US_ASCII) != "GGUF") {
+                    part.delete()
+                    throw IllegalStateException("Сервер вернул не GGUF-модель. Файл удалён.")
+                }
+                if (modelFile.exists()) modelFile.delete()
+                if (!part.renameTo(modelFile)) {
+                    part.copyTo(modelFile, overwrite = true)
+                    part.delete()
+                }
+                runOnUiThread {
+                    status.text = "МОДЕЛЬ СКАЧАНА • ЗАГРУЖАЮ В ПАМЯТЬ..."
+                    loadLocalModel(modelFile)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "ЗАГРУЗКА МОДЕЛИ ПРЕРВАНА"
+                    addBubble("Система", e.message ?: "Не удалось скачать модель. Незавершённая загрузка сохранена для продолжения.", false)
                 }
             }
         }
@@ -503,6 +608,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val QWEN_MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_0.gguf"
         private const val REQUEST_OVERLAY = 501
         private const val REQUEST_MODEL = 502
         private const val REQUEST_VOICE = 503
