@@ -36,6 +36,7 @@ class MainActivity : Activity() {
     private var isSending = false
     private var modelReady = false
     private var voiceReply = false
+    private var voicePendingPermission = false
     private var tts: TextToSpeech? = null
     private val maxHistoryMessages = 40
     private val prefs by lazy { getSharedPreferences("jarvis", MODE_PRIVATE) }
@@ -162,6 +163,16 @@ class MainActivity : Activity() {
             addBubble("Система", "Сначала подключи локальную модель через меню «Модель».", false)
             return
         }
+        if (!Settings.canDrawOverlays(this)) {
+            voicePendingPermission = true
+            startActivityForResult(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
+                REQUEST_OVERLAY
+            )
+            return
+        }
+        prefs.edit().putBoolean("orb_enabled", true).apply()
+        startOrbService()
         try {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -339,7 +350,14 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Android API")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_OVERLAY && Settings.canDrawOverlays(this)) toggleOrb()
+        if (requestCode == REQUEST_OVERLAY && Settings.canDrawOverlays(this)) {
+            if (voicePendingPermission) {
+                voicePendingPermission = false
+                startVoiceInput()
+            } else {
+                toggleOrb()
+            }
+        }
         if (requestCode == REQUEST_MODEL && resultCode == RESULT_OK) {
             data?.data?.let { importModel(it) }
         }
@@ -393,6 +411,7 @@ class MainActivity : Activity() {
             } catch (ex: Throwable) {
                 runOnUiThread {
                     addBubble("Система", ex.message ?: "Ошибка локальной генерации", false)
+                    voiceReply = false
                     finishSending("ОШИБКА ЛОКАЛЬНОЙ МОДЕЛИ")
                 }
             }
