@@ -3,6 +3,9 @@ package com.stahij.jarvis
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.speech.RecognizerIntent
+import android.speech.tts.TextToSpeech
+import android.widget.PopupMenu
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
@@ -32,6 +35,8 @@ class MainActivity : Activity() {
     private lateinit var sendButton: Button
     private var isSending = false
     private var modelReady = false
+    private var voiceReply = false
+    private var tts: TextToSpeech? = null
     private val maxHistoryMessages = 40
     private val prefs by lazy { getSharedPreferences("jarvis", MODE_PRIVATE) }
     private val history = JSONArray()
@@ -42,6 +47,7 @@ class MainActivity : Activity() {
         window.statusBarColor = bg
         window.navigationBarColor = bg
         buildUi()
+        tts = TextToSpeech(this) { }
         loadHistory()
         if (modelFile.exists() && modelFile.length() > 0L) {
             loadLocalModel(modelFile)
@@ -63,29 +69,21 @@ class MainActivity : Activity() {
         }
         val title = TextView(this).apply {
             text = "J A R V I S"
-            textSize = 23f
+            textSize = 22f
+            setSingleLine(true)
             setTextColor(cyan)
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }
         header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(Button(this).apply {
-            text = "ОБН"
+        val menuButton = Button(this).apply {
+            text = "☰"
+            textSize = 22f
             setTextColor(cyan)
             setBackgroundColor(Color.rgb(12, 36, 53))
-            setOnClickListener { checkForUpdates(manual = true) }
-        })
-        header.addView(Button(this).apply {
-            text = "МОЗГ"
-            setTextColor(cyan)
-            setBackgroundColor(Color.rgb(12, 36, 53))
-            setOnClickListener { chooseModel() }
-        })
-        header.addView(Button(this).apply {
-            text = "ЯДРО"
-            setTextColor(cyan)
-            setBackgroundColor(Color.rgb(12, 36, 53))
-            setOnClickListener { toggleOrb() }
-        })
+            minWidth = dp(48)
+            setOnClickListener { showMainMenu(this) }
+        }
+        header.addView(menuButton, LinearLayout.LayoutParams(dp(48), dp(44)))
         root.addView(header)
 
         status = TextView(this).apply {
@@ -129,9 +127,54 @@ class MainActivity : Activity() {
             setBackgroundColor(cyan)
             setOnClickListener { sendMessage() }
         }
-        row.addView(sendButton, LinearLayout.LayoutParams(dp(58), dp(52)))
+        row.addView(sendButton, LinearLayout.LayoutParams(dp(54), dp(52)))
+        val voiceButton = Button(this).apply {
+            text = "🎙"
+            textSize = 19f
+            setTextColor(cyan)
+            setBackgroundColor(Color.rgb(15, 48, 67))
+            minWidth = dp(50)
+            setOnClickListener { startVoiceInput() }
+        }
+        row.addView(voiceButton, LinearLayout.LayoutParams(dp(50), dp(52)).apply {
+            leftMargin = dp(6)
+        })
         root.addView(row)
         setContentView(root)
+    }
+
+    private fun showMainMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            menu.add("Проверка версии").setOnMenuItemClickListener {
+                checkForUpdates(manual = true)
+                true
+            }
+            menu.add("Модель").setOnMenuItemClickListener {
+                chooseModel()
+                true
+            }
+            show()
+        }
+    }
+
+    private fun startVoiceInput() {
+        if (!modelReady) {
+            addBubble("Система", "Сначала подключи локальную модель через меню «Модель».", false)
+            return
+        }
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Слушаю тебя")
+                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            }
+            voiceReply = true
+            startActivityForResult(intent, REQUEST_VOICE)
+        } catch (_: Exception) {
+            voiceReply = false
+            addBubble("Система", "На телефоне не найден сервис распознавания речи.", false)
+        }
     }
 
     private fun maybeCheckForUpdates() {
@@ -300,6 +343,18 @@ class MainActivity : Activity() {
         if (requestCode == REQUEST_MODEL && resultCode == RESULT_OK) {
             data?.data?.let { importModel(it) }
         }
+        if (requestCode == REQUEST_VOICE) {
+            val spoken = if (resultCode == RESULT_OK) {
+                data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            } else null
+            if (!spoken.isNullOrBlank()) {
+                input.setText(spoken)
+                sendMessage()
+            } else {
+                voiceReply = false
+                status.text = "ГОЛОСОВОЙ ВВОД ОТМЕНЁН"
+            }
+        }
     }
 
     private fun sendMessage() {
@@ -349,7 +404,16 @@ class MainActivity : Activity() {
         input.isEnabled = true
         sendButton.isEnabled = modelReady
         status.text = statusText
-        input.requestFocus()
+        if (voiceReply) {
+            voiceReply = false
+            val reply = history.optJSONObject(history.length() - 1)?.optString("content").orEmpty()
+            if (reply.isNotBlank()) {
+                tts?.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "jarvis_voice_reply")
+                moveTaskToBack(true)
+            }
+        } else {
+            input.requestFocus()
+        }
     }
 
     private fun addBubble(who: String, text: String, outgoing: Boolean) {
@@ -414,11 +478,14 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         executor.shutdownNow()
+        tts?.stop()
+        tts?.shutdown()
         super.onDestroy()
     }
 
     companion object {
         private const val REQUEST_OVERLAY = 501
         private const val REQUEST_MODEL = 502
+        private const val REQUEST_VOICE = 503
     }
 }
