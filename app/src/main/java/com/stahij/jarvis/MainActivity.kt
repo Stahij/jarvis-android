@@ -33,12 +33,12 @@ class MainActivity : Activity() {
     private lateinit var input: EditText
     private lateinit var status: TextView
     private lateinit var sendButton: Button
-    private var isSending = false
+    private var modelScreenDialog: AlertDialog? = null\n    private var isSending = false
     private var modelReady = false
     private var voiceReply = false
     private var voicePendingPermission = false
     private var tts: TextToSpeech? = null
-    private val maxHistoryMessages = 40
+    private val maxHistoryMessages = 24
     private val prefs by lazy { getSharedPreferences("jarvis", MODE_PRIVATE) }
     private val history = JSONArray()
     private val modelFile by lazy { File(File(filesDir, "models"), "qwen-coder.gguf") }
@@ -146,20 +146,57 @@ class MainActivity : Activity() {
 
     private fun showMainMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
-            menu.add("Проверка версии").setOnMenuItemClickListener {
+            menu.add("Модель").setOnMenuItemClickListener {
+                showModelScreen()
+                true
+            }
+            menu.add("Проверка обновлений").setOnMenuItemClickListener {
                 checkForUpdates(manual = true)
-                true
-            }
-            menu.add("Скачать модель Qwen (1,1 ГБ)").setOnMenuItemClickListener {
-                confirmQwenDownload()
-                true
-            }
-            menu.add("Выбрать GGUF-файл").setOnMenuItemClickListener {
-                chooseModel()
                 true
             }
             show()
         }
+    }
+
+    // Отдельный экран управления локальной моделью, открываемый из бургер-меню.
+    private fun showModelScreen() {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(28), dp(24), dp(20))
+            setBackgroundColor(bg)
+        }
+        panel.addView(TextView(this).apply {
+            text = "МОДЕЛЬ JARVIS"
+            textSize = 21f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(cyan)
+        })
+        panel.addView(TextView(this).apply {
+            text = if (modelReady) "Локальная модель готова к работе"
+                else if (modelFile.exists()) "Модель найдена • требуется подключение"
+                else "Локальная модель не установлена"
+            textSize = 14f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, dp(10), 0, dp(22))
+        })
+        fun actionButton(label: String, action: () -> Unit) {
+            panel.addView(Button(this).apply {
+                text = label
+                isAllCaps = false
+                setTextColor(cyan)
+                setBackgroundColor(Color.rgb(12, 36, 53))
+                setOnClickListener { action() }
+            }, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(12) })
+        }
+        actionButton("Скачать Qwen • около 1,1 ГБ") { confirmQwenDownload() }
+        actionButton("Импортировать GGUF-файл") { chooseModel() }
+        actionButton("Назад") { modelScreenDialog?.dismiss() }
+        modelScreenDialog = AlertDialog.Builder(this).setView(panel).create()
+        modelScreenDialog?.setOnShowListener {
+            modelScreenDialog?.window?.setLayout(-1, -1)
+        }
+        modelScreenDialog?.show()
+        modelScreenDialog?.window?.setLayout(-1, -1)
     }
 
     private fun startVoiceInput() {
@@ -508,11 +545,26 @@ class MainActivity : Activity() {
             Если актуальные сведения без сети недоступны, честно скажи об этом.
             Отвечай по-русски, ясно, доброжелательно и по существу.
         """.trimIndent()
-        val roles = Array(history.length() + 1) { i ->
-            if (i == 0) "system" else history.getJSONObject(i - 1).optString("role", "user")
+        // В модель отправляем только последние 8 реплик: сохранённая история остаётся полной,
+        // но каждый новый запрос не заставляет движок повторно обрабатывать весь диалог.
+        val promptStart = (history.length() - 8).coerceAtLeast(0)
+        val promptHistory = (promptStart until history.length()).map { history.getJSONObject(it) }
+        val roles = Array(promptHistory.size + 1) { i ->
+            if (i == 0) "system" else promptHistory[i - 1].optString("role", "user")
         }
-        val contents = Array(history.length() + 1) { i ->
-            if (i == 0) systemInstruction else history.getJSONObject(i - 1).optString("content")
+        val contents = Array(promptHistory.size + 1) { i ->
+            if (i == 0) systemInstruction else promptHistory[i - 1].optString("content")
+        }
+
+        // Частые короткие приветствия отвечаем мгновенно, не запуская LLM.
+        val quickReply = quickGreetingReply(prompt)
+        if (quickReply != null) {
+            history.put(JSONObject().put("role", "assistant").put("content", quickReply))
+            trimHistory()
+            saveHistory()
+            addBubble("Джарвис", quickReply, false)
+            finishSending("ГОТОВ К ДИАЛОГУ")
+            return
         }
 
         isSending = true
@@ -538,6 +590,19 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun quickGreetingReply(message: String): String? {
+        val normalized = message.lowercase()
+            .replace(Regex("[^\\p{L}\\p{N}\\s]"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+        val greetings = setOf(
+            "привет", "приветик", "здравствуй", "здравствуйте", "доброе утро",
+            "добрый день", "добрый вечер", "хай", "салют", "ку"
+        )
+        return if (normalized in greetings) "Привет! Я на связи. Чем займёмся?"
+            else null
     }
 
     private fun finishSending(statusText: String) {
