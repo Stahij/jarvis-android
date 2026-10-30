@@ -70,6 +70,21 @@ jobs:
           mkdir -p "$RUNNER_TEMP/jarvis-signing"
           echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/jarvis-signing/jarvis-release.jks"
           chmod 600 "$RUNNER_TEMP/jarvis-signing/jarvis-release.jks"
+      - name: Diagnose signing credentials without exposing them
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/jarvis-signing/jarvis-release.jks
+          STORE_PASSWORD: ${{ secrets.JARVIS_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.JARVIS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.JARVIS_KEY_PASSWORD }}
+        run: |
+          set +x
+          echo "Checking keystore password and alias..."
+          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          echo "PASS: keystore password and alias are valid."
+          echo "Checking private-key password..."
+          keytool -certreq -alias "$KEY_ALIAS" -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" -file "$RUNNER_TEMP/jarvis-signing/key-check.csr" >/dev/null
+          rm -f "$RUNNER_TEMP/jarvis-signing/key-check.csr"
+          echo "PASS: private-key password is valid."
       - name: Build signed release APK
         env:
           JARVIS_KEYSTORE_PATH: ${{ runner.temp }}/jarvis-signing/jarvis-release.jks
