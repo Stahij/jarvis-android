@@ -12,7 +12,7 @@ Then run **Actions → Build Jarvis Android APK → Run workflow** and set `buil
 
 Expected signing certificate SHA-256:
 
-`D2:D4:96:E1:05:97:20:CC:2E:4C:79:3D:95:10:03:B7:CD:48:2F:47:45:9C:FC:C1:B0:E8:76:F1:F0:98:C9`
+`D2:15:D4:96:E1:05:97:20:CC:2E:4C:79:3D:95:10:03:B7:CD:48:2F:47:45:9C:FC:C1:B0:E8:76:F1:F0:98:C9`
 
 Important migration note: the existing 0.1.1-preview APK is signed with an Android Debug certificate. A release-signed APK cannot update it in place unless its signing certificate matches. Keep the existing app installed until a data-preserving migration path is tested.
 
