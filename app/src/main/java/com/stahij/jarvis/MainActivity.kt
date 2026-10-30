@@ -48,6 +48,7 @@ class MainActivity : Activity() {
         } else {
             status.text = "МОЗГ НЕ ПОДКЛЮЧЁН • ВЫБЕРИ GGUF"
         }
+        maybeCheckForUpdates()
     }
 
     private fun buildUi() {
@@ -67,6 +68,12 @@ class MainActivity : Activity() {
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         }
         header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(Button(this).apply {
+            text = "ОБН"
+            setTextColor(cyan)
+            setBackgroundColor(Color.rgb(12, 36, 53))
+            setOnClickListener { checkForUpdates(manual = true) }
+        })
         header.addView(Button(this).apply {
             text = "МОЗГ"
             setTextColor(cyan)
