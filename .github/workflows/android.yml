@@ -81,9 +81,18 @@ jobs:
           echo "Checking keystore password and alias..."
           keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
           echo "PASS: keystore password and alias are valid."
-          echo "Checking private-key password..."
-          keytool -certreq -alias "$KEY_ALIAS" -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" -file "$RUNNER_TEMP/jarvis-signing/key-check.csr" >/dev/null
-          rm -f "$RUNNER_TEMP/jarvis-signing/key-check.csr"
+          echo "Checking private-key password (diagnostic output contains no password values)..."
+          set +e
+          keytool -certreq -alias "$KEY_ALIAS" -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" -file "$RUNNER_TEMP/jarvis-signing/key-check.csr" >"$RUNNER_TEMP/jarvis-signing/keytool.stdout" 2>"$RUNNER_TEMP/jarvis-signing/keytool.stderr"
+          KEY_CHECK_STATUS=$?
+          set -e
+          if [ "$KEY_CHECK_STATUS" -ne 0 ]; then
+            echo "FAIL: keytool could not unlock/use the private key. Safe diagnostic follows:"
+            cat "$RUNNER_TEMP/jarvis-signing/keytool.stderr"
+            cat "$RUNNER_TEMP/jarvis-signing/keytool.stdout"
+            exit "$KEY_CHECK_STATUS"
+          fi
+          rm -f "$RUNNER_TEMP/jarvis-signing/key-check.csr" "$RUNNER_TEMP/jarvis-signing/keytool.stdout" "$RUNNER_TEMP/jarvis-signing/keytool.stderr"
           echo "PASS: private-key password is valid."
       - name: Build signed release APK
         env:
