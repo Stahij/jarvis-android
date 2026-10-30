@@ -1,12 +1,21 @@
 name: Build Jarvis Android APK
+
 on:
   push:
-    branches: [ "main", "preview/**" ]
+    branches: [ "main", "preview/**", "release-signing-bootstrap" ]
   workflow_dispatch:
+    inputs:
+      build_release:
+        description: "Build release-signed APK (requires repository signing secrets)"
+        required: true
+        type: boolean
+        default: false
+
 permissions:
   contents: read
+
 jobs:
-  build:
+  debug:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,10 +30,62 @@ jobs:
           gradle-version: "8.9"
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Jarvis-Android-0.1.1-preview-debug
+          name: Jarvis-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify signing secrets exist
+        env:
+          KEYSTORE_B64: ${{ secrets.JARVIS_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.JARVIS_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.JARVIS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.JARVIS_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_B64" || (echo "Missing JARVIS_KEYSTORE_BASE64" && exit 1)
+          test -n "$STORE_PASSWORD" || (echo "Missing JARVIS_STORE_PASSWORD" && exit 1)
+          test -n "$KEY_ALIAS" || (echo "Missing JARVIS_KEY_ALIAS" && exit 1)
+          test -n "$KEY_PASSWORD" || (echo "Missing JARVIS_KEY_PASSWORD" && exit 1)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Restore private signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.JARVIS_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/jarvis-signing"
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/jarvis-signing/jarvis-release.jks"
+          chmod 600 "$RUNNER_TEMP/jarvis-signing/jarvis-release.jks"
+      - name: Build signed release APK
+        env:
+          JARVIS_KEYSTORE_PATH: ${{ runner.temp }}/jarvis-signing/jarvis-release.jks
+          JARVIS_STORE_PASSWORD: ${{ secrets.JARVIS_STORE_PASSWORD }}
+          JARVIS_KEY_ALIAS: ${{ secrets.JARVIS_KEY_ALIAS }}
+          JARVIS_KEY_PASSWORD: ${{ secrets.JARVIS_KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon
+      - name: Verify APK signature
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          sha256sum "$APK"
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-release-signed-${{ github.sha }}
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
