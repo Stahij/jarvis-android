@@ -33,7 +33,8 @@ class MainActivity : Activity() {
     private lateinit var input: EditText
     private lateinit var status: TextView
     private lateinit var sendButton: Button
-    private var modelScreenDialog: AlertDialog? = null\n    private var isSending = false
+    private var modelScreenDialog: AlertDialog? = null
+    private var isSending = false
     private var modelReady = false
     private var voiceReply = false
     private var voicePendingPermission = false
