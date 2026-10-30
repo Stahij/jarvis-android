@@ -53,7 +53,7 @@ class MainActivity : Activity() {
         if (modelFile.exists() && modelFile.length() > 0L) {
             loadLocalModel(modelFile)
         } else {
-            status.text = "МОЗГ НЕ ПОДКЛЮЧЁН • ВЫБЕРИ GGUF"
+            status.text = "ОЖИДАЕТ ПОДКЛЮЧЕНИЯ МОДЕЛИ"
         }
         maybeCheckForUpdates()
     }
@@ -279,7 +279,7 @@ class MainActivity : Activity() {
 
     private fun downloadQwenModel() {
         sendButton.isEnabled = false
-        status.text = "ПОДГОТОВКА ЗАГРУЗКИ QWEN..."
+        status.text = "ГОТОВЛЮ ЗАГРУЗКУ..."
         executor.execute {
             try {
                 val directory = modelFile.parentFile ?: throw IllegalStateException("Нет папки моделей")
@@ -348,7 +348,7 @@ class MainActivity : Activity() {
                     part.delete()
                 }
                 runOnUiThread {
-                    status.text = "МОДЕЛЬ СКАЧАНА • ЗАГРУЖАЮ В ПАМЯТЬ..."
+                    status.text = "ПОДКЛЮЧАЮ МОДЕЛЬ..."
                     loadLocalModel(modelFile)
                 }
             } catch (e: Exception) {
@@ -406,7 +406,7 @@ class MainActivity : Activity() {
     private fun loadLocalModel(file: File) {
         modelReady = false
         sendButton.isEnabled = false
-        status.text = "ЗАГРУЖАЮ МОЗГ • ЭТО МОЖЕТ ЗАНЯТЬ ВРЕМЯ..."
+        status.text = "ЗАПУСКАЮ МОДЕЛЬ..."
         executor.execute {
             try {
                 val error = NativeLlm.nativeLoadModel(file.absolutePath, 4, 4096)
@@ -414,7 +414,7 @@ class MainActivity : Activity() {
                     if (error == null) {
                         modelReady = true
                         sendButton.isEnabled = true
-                        status.text = "ЛОКАЛЬНЫЙ ИНТЕЛЛЕКТ • ГОТОВ К РАБОТЕ"
+                        status.text = "ГОТОВ К ДИАЛОГУ"
                     } else {
                         status.text = "НЕ УДАЛОСЬ ЗАГРУЗИТЬ МОДЕЛЬ"
                         addBubble("Система", error, false)
@@ -433,8 +433,8 @@ class MainActivity : Activity() {
         if (Settings.canDrawOverlays(this)) {
             prefs.edit().putBoolean("orb_enabled", true).apply()
             startOrbService()
-            status.text = if (modelReady) "ЛОКАЛЬНЫЙ ИНТЕЛЛЕКТ • ЯДРО АКТИВНО"
-                else "ЯДРО АКТИВНО • ВЫБЕРИ МОДЕЛЬ GGUF"
+            status.text = if (modelReady) "ЯДРО АКТИВНО"
+                else "ЯДРО АКТИВНО • МОДЕЛЬ НЕ ВЫБРАНА"
         } else {
             startActivityForResult(
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
@@ -495,13 +495,30 @@ class MainActivity : Activity() {
         trimHistory()
         saveHistory()
 
-        val roles = Array(history.length()) { i -> history.getJSONObject(i).optString("role", "user") }
-        val contents = Array(history.length()) { i -> history.getJSONObject(i).optString("content") }
+        // The model runs locally through llama.cpp. Network access is optional and must
+        // never be described as a requirement for ordinary chat or local generation.
+        val systemInstruction = """
+            Ты — Jarvis, персональный ИИ-помощник пользователя.
+            Сейчас ты работаешь как локальная языковая модель внутри Android-приложения через llama.cpp.
+            Обычный диалог, рассуждение и генерация ответов выполняются на устройстве и не требуют интернета.
+            Не утверждай, что для обычного общения тебе обязательно нужен интернет.
+            Интернет может использоваться только отдельными функциями поиска и получения актуальных сведений,
+            когда такие функции доступны и пользователь явно попросил их использовать.
+            Не выдумывай, будто ты уже выполнил поиск, открыл сайт или проверил свежие данные.
+            Если актуальные сведения без сети недоступны, честно скажи об этом.
+            Отвечай по-русски, ясно, доброжелательно и по существу.
+        """.trimIndent()
+        val roles = Array(history.length() + 1) { i ->
+            if (i == 0) "system" else history.getJSONObject(i - 1).optString("role", "user")
+        }
+        val contents = Array(history.length() + 1) { i ->
+            if (i == 0) systemInstruction else history.getJSONObject(i - 1).optString("content")
+        }
 
         isSending = true
         input.isEnabled = false
         sendButton.isEnabled = false
-        status.text = "ЛОКАЛЬНЫЙ МОЗГ ОБРАБАТЫВАЕТ ЗАПРОС..."
+        status.text = "ДУМАЮ..."
 
         executor.execute {
             try {
@@ -511,7 +528,7 @@ class MainActivity : Activity() {
                     trimHistory()
                     saveHistory()
                     addBubble("Джарвис", answer.ifBlank { "Модель не вернула ответ. Попробуй ещё раз." }, false)
-                    finishSending("ЛОКАЛЬНЫЙ ИНТЕЛЛЕКТ • ГОТОВ")
+                    finishSending("ГОТОВ К ДИАЛОГУ")
                 }
             } catch (ex: Throwable) {
                 runOnUiThread {
