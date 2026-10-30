@@ -1,6 +1,7 @@
 package com.stahij.jarvis
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -124,6 +125,73 @@ class MainActivity : Activity() {
         row.addView(sendButton, LinearLayout.LayoutParams(dp(58), dp(52)))
         root.addView(row)
         setContentView(root)
+    }
+
+    private fun maybeCheckForUpdates() {
+        val lastCheck = prefs.getLong("last_update_check", 0L)
+        if (System.currentTimeMillis() - lastCheck >= 24L * 60L * 60L * 1000L) {
+            checkForUpdates(manual = false)
+        }
+    }
+
+    private fun checkForUpdates(manual: Boolean) {
+        if (manual) status.text = "ПРОВЕРЯЮ ОБНОВЛЕНИЯ..."
+        executor.execute {
+            try {
+                val update = UpdateManager(this).checkForUpdate()
+                prefs.edit().putLong("last_update_check", System.currentTimeMillis()).apply()
+                runOnUiThread {
+                    if (update == null) {
+                        if (manual) {
+                            AlertDialog.Builder(this)
+                                .setTitle("Jarvis")
+                                .setMessage("Установлена последняя доступная версия.")
+                                .setPositiveButton("Хорошо", null)
+                                .show()
+                        }
+                    } else {
+                        AlertDialog.Builder(this)
+                            .setTitle("Доступно обновление Jarvis")
+                            .setMessage("Новая версия: ${update.version}. Скачать и установить?")
+                            .setNegativeButton("Позже", null)
+                            .setPositiveButton("Скачать") { _, _ -> downloadAndInstall(update) }
+                            .show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (manual) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Не удалось проверить обновления")
+                            .setMessage(e.message ?: "Проверь подключение к интернету.")
+                            .setPositiveButton("Закрыть", null)
+                            .show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun downloadAndInstall(update: JarvisUpdate) {
+        status.text = "СКАЧИВАЮ ОБНОВЛЕНИЕ ${update.version}..."
+        executor.execute {
+            try {
+                val apk = UpdateManager(this).downloadAndVerify(update)
+                runOnUiThread {
+                    status.text = "ПОДПИСЬ И SHA-256 ПРОВЕРЕНЫ • ОТКРЫВАЮ УСТАНОВЩИК"
+                    UpdateManager(this).install(apk)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "ОШИБКА ОБНОВЛЕНИЯ"
+                    AlertDialog.Builder(this)
+                        .setTitle("Обновление не установлено")
+                        .setMessage(e.message ?: "Неизвестная ошибка")
+                        .setPositiveButton("Закрыть", null)
+                        .show()
+                }
+            }
+        }
     }
 
     private fun chooseModel() {
