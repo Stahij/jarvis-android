@@ -95,8 +95,8 @@ class OrbService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = prefs.getInt(KEY_X, (screenWidth - size) / 2).coerceIn(0, (screenWidth - size).coerceAtLeast(0))
-            y = prefs.getInt(KEY_Y, screenHeight / 3).coerceIn(0, (screenHeight - size).coerceAtLeast(0))
+            x = prefs.getInt(KEY_X, screenWidth - size - (12 * resources.displayMetrics.density).toInt()).coerceIn(0, (screenWidth - size).coerceAtLeast(0))
+            y = prefs.getInt(KEY_Y, (screenHeight * 0.72f).toInt()).coerceIn(0, (screenHeight - size).coerceAtLeast(0))
         }
 
         val view = OrbView(this)
@@ -129,6 +129,9 @@ class OrbService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (moved) {
+                        val maxX = (resources.displayMetrics.widthPixels - size).coerceAtLeast(0)
+                        params.x = if (params.x + size / 2 < resources.displayMetrics.widthPixels / 2) 0 else maxX
+                        try { wm.updateViewLayout(view, params) } catch (_: Exception) {}
                         prefs.edit().putInt(KEY_X, params.x).putInt(KEY_Y, params.y).apply()
                     } else {
                         startActivity(
