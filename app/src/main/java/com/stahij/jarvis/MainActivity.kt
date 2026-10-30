@@ -17,9 +17,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
+import java.io.File
 import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
@@ -32,9 +30,11 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var sendButton: Button
     private var isSending = false
+    private var modelReady = false
     private val maxHistoryMessages = 40
     private val prefs by lazy { getSharedPreferences("jarvis", MODE_PRIVATE) }
     private val history = JSONArray()
+    private val modelFile by lazy { File(File(filesDir, "models"), "qwen-coder.gguf") }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +42,11 @@ class MainActivity : Activity() {
         window.navigationBarColor = bg
         buildUi()
         loadHistory()
+        if (modelFile.exists() && modelFile.length() > 0L) {
+            loadLocalModel(modelFile)
+        } else {
+            status.text = "МОЗГ НЕ ПОДКЛЮЧЁН • ВЫБЕРИ GGUF"
+        }
     }
 
     private fun buildUi() {
@@ -62,6 +67,12 @@ class MainActivity : Activity() {
         }
         header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
         header.addView(Button(this).apply {
+            text = "МОЗГ"
+            setTextColor(cyan)
+            setBackgroundColor(Color.rgb(12, 36, 53))
+            setOnClickListener { chooseModel() }
+        })
+        header.addView(Button(this).apply {
             text = "ЯДРО"
             setTextColor(cyan)
             setBackgroundColor(Color.rgb(12, 36, 53))
@@ -70,7 +81,7 @@ class MainActivity : Activity() {
         root.addView(header)
 
         status = TextView(this).apply {
-            text = "ЛОКАЛЬНЫЙ ИНТЕЛЛЕКТ • QWEN"
+            text = "ВСТРОЕННЫЙ ДВИЖОК • QWEN"
             textSize = 11f
             setTextColor(Color.rgb(104, 160, 181))
             setPadding(0, dp(4), 0, dp(10))
@@ -115,15 +126,85 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
+    private fun chooseModel() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_TITLE, "Выбери GGUF-модель Qwen")
+        }
+        startActivityForResult(intent, REQUEST_MODEL)
+    }
+
+    private fun importModel(uri: Uri) {
+        modelReady = false
+        sendButton.isEnabled = false
+        status.text = "КОПИРУЮ МОДЕЛЬ В ПАМЯТЬ JARVIS..."
+        executor.execute {
+            try {
+                val directory = modelFile.parentFile ?: throw IllegalStateException("Нет папки моделей")
+                if (!directory.exists() && !directory.mkdirs()) {
+                    throw IllegalStateException("Не удалось создать папку модели")
+                }
+                val temporary = File(directory, "qwen-coder.gguf.part")
+                contentResolver.openInputStream(uri)?.use { source ->
+                    temporary.outputStream().use { target -> source.copyTo(target) }
+                } ?: throw IllegalStateException("Не удалось открыть выбранный файл")
+
+                if (temporary.length() < 1024L * 1024L) {
+                    temporary.delete()
+                    throw IllegalStateException("Файл слишком маленький для GGUF-модели")
+                }
+                if (modelFile.exists()) modelFile.delete()
+                if (!temporary.renameTo(modelFile)) {
+                    temporary.copyTo(modelFile, overwrite = true)
+                    temporary.delete()
+                }
+                runOnUiThread { loadLocalModel(modelFile) }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "ОШИБКА ИМПОРТА МОДЕЛИ"
+                    addBubble("Система", e.message ?: "Не удалось импортировать модель", false)
+                }
+            }
+        }
+    }
+
+    private fun loadLocalModel(file: File) {
+        modelReady = false
+        sendButton.isEnabled = false
+        status.text = "ЗАГРУЖАЮ МОЗГ • ЭТО МОЖЕТ ЗАНЯТЬ ВРЕМЯ..."
+        executor.execute {
+            try {
+                val error = NativeLlm.nativeLoadModel(file.absolutePath, 4, 4096)
+                runOnUiThread {
+                    if (error == null) {
+                        modelReady = true
+                        sendButton.isEnabled = true
+                        status.text = "ЛОКАЛЬНЫЙ ИНТЕЛЛЕКТ • ГОТОВ К РАБОТЕ"
+                    } else {
+                        status.text = "НЕ УДАЛОСЬ ЗАГРУЗИТЬ МОДЕЛЬ"
+                        addBubble("Система", error, false)
+                    }
+                }
+            } catch (e: Throwable) {
+                runOnUiThread {
+                    status.text = "ОШИБКА ВСТРОЕННОГО ДВИЖКА"
+                    addBubble("Система", e.message ?: e.javaClass.simpleName, false)
+                }
+            }
+        }
+    }
+
     private fun toggleOrb() {
         if (Settings.canDrawOverlays(this)) {
             prefs.edit().putBoolean("orb_enabled", true).apply()
             startOrbService()
-            status.text = "ЭНЕРГЕТИЧЕСКОЕ ЯДРО АКТИВНО • нажми шар, чтобы вернуться"
+            status.text = if (modelReady) "ЛОКАЛЬНЫЙ ИНТЕЛЛЕКТ • ЯДРО АКТИВНО"
+                else "ЯДРО АКТИВНО • ВЫБЕРИ МОДЕЛЬ GGUF"
         } else {
             startActivityForResult(
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
-                501
+                REQUEST_OVERLAY
             )
         }
     }
@@ -140,11 +221,18 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Android API")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 501 && Settings.canDrawOverlays(this)) toggleOrb()
+        if (requestCode == REQUEST_OVERLAY && Settings.canDrawOverlays(this)) toggleOrb()
+        if (requestCode == REQUEST_MODEL && resultCode == RESULT_OK) {
+            data?.data?.let { importModel(it) }
+        }
     }
 
     private fun sendMessage() {
         if (isSending) return
+        if (!modelReady) {
+            addBubble("Система", "Сначала подключи GGUF-модель через кнопку «МОЗГ».", false)
+            return
+        }
         val prompt = input.text.toString().trim()
         if (prompt.isEmpty()) return
 
@@ -154,59 +242,29 @@ class MainActivity : Activity() {
         trimHistory()
         saveHistory()
 
-        // Snapshot on the UI thread: the request cannot race with later history edits.
-        val requestMessages = JSONArray(history.toString())
-        val payload = JSONObject()
-            .put("messages", requestMessages)
-            .put("temperature", 0.7)
-            .put("max_tokens", 512)
+        val roles = Array(history.length()) { i -> history.getJSONObject(i).optString("role", "user") }
+        val contents = Array(history.length()) { i -> history.getJSONObject(i).optString("content") }
 
         isSending = true
         input.isEnabled = false
         sendButton.isEnabled = false
-        status.text = "QWEN ОБРАБАТЫВАЕТ ЗАПРОС..."
+        status.text = "ЛОКАЛЬНЫЙ МОЗГ ОБРАБАТЫВАЕТ ЗАПРОС..."
 
         executor.execute {
-            var connection: HttpURLConnection? = null
             try {
-                connection = (URL("http://127.0.0.1:8080/v1/chat/completions")
-                    .openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 10000
-                    readTimeout = 120000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                }
-                OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use {
-                    it.write(payload.toString())
-                }
-                val code = connection.responseCode
-                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                if (code !in 200..299) throw IllegalStateException("HTTP $code: $body")
-
-                val answer = JSONObject(body).getJSONArray("choices")
-                    .getJSONObject(0).getJSONObject("message").getString("content").trim()
-
+                val answer = NativeLlm.nativeGenerate(roles, contents, 512).trim()
                 runOnUiThread {
                     history.put(JSONObject().put("role", "assistant").put("content", answer))
                     trimHistory()
                     saveHistory()
-                    addBubble("Джарвис", answer, false)
+                    addBubble("Джарвис", answer.ifBlank { "Модель не вернула ответ. Попробуй ещё раз." }, false)
                     finishSending("ЛОКАЛЬНЫЙ ИНТЕЛЛЕКТ • ГОТОВ")
                 }
-            } catch (ex: Exception) {
+            } catch (ex: Throwable) {
                 runOnUiThread {
-                    addBubble(
-                        "Система",
-                        "Не удалось подключиться к Qwen на 127.0.0.1:8080. Проверь llama-server в Termux. " +
-                            (ex.message ?: "Неизвестная ошибка"),
-                        false
-                    )
-                    finishSending("НЕТ СОЕДИНЕНИЯ С QWEN")
+                    addBubble("Система", ex.message ?: "Ошибка локальной генерации", false)
+                    finishSending("ОШИБКА ЛОКАЛЬНОЙ МОДЕЛИ")
                 }
-            } finally {
-                connection?.disconnect()
             }
         }
     }
@@ -214,7 +272,7 @@ class MainActivity : Activity() {
     private fun finishSending(statusText: String) {
         isSending = false
         input.isEnabled = true
-        sendButton.isEnabled = true
+        sendButton.isEnabled = modelReady
         status.text = statusText
         input.requestFocus()
     }
@@ -268,7 +326,6 @@ class MainActivity : Activity() {
 
     private fun trimHistory() {
         while (history.length() > maxHistoryMessages) history.remove(0)
-        // Avoid starting a fresh context with an orphaned assistant response.
         if (history.length() > 0 && history.optJSONObject(0)?.optString("role") == "assistant") {
             history.remove(0)
         }
@@ -283,5 +340,10 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         executor.shutdownNow()
         super.onDestroy()
+    }
+
+    companion object {
+        private const val REQUEST_OVERLAY = 501
+        private const val REQUEST_MODEL = 502
     }
 }
