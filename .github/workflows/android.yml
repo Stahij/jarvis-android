@@ -48,7 +48,7 @@ jobs:
           retention-days: 14
 
   release:
-    if: (github.event_name == 'workflow_dispatch' && inputs.build_release) || startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'workflow_dispatch' && inputs.build_release) || startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/feature/local-brain-and-updater'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
