@@ -6,14 +6,29 @@ plugins {
 android {
     namespace = "com.stahij.jarvis"
     compileSdk = 35
+    ndkVersion = "29.0.13113456"
 
     defaultConfig {
-        // Keep preview separate from the original 0.1.0 package.
         applicationId = "com.stahij.jarvis.preview"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1-preview"
+        versionCode = 3
+        versionName = "0.2.0"
+
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments += listOf(
+                    "-DCMAKE_BUILD_TYPE=Release",
+                    "-DGGML_NATIVE=OFF",
+                    "-DGGML_OPENMP=OFF",
+                    "-DGGML_LLAMAFILE=OFF"
+                )
+            }
+        }
     }
 
     signingConfigs {
@@ -32,6 +47,13 @@ android {
         getByName("release") {
             signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.31.6"
         }
     }
 
