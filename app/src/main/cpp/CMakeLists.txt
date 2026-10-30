@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(jarvis-native LANGUAGES C CXX)
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 include(FetchContent)
 
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
