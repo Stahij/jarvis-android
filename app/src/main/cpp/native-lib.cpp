@@ -44,8 +44,8 @@ Java_com_stahij_jarvis_NativeLlm_nativeLoadModel(
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = static_cast<uint32_t>(std::max(1024, static_cast<int>(context_size)));
-    ctx_params.n_batch = 512;
-    ctx_params.n_ubatch = 512;
+    ctx_params.n_batch = 256;
+    ctx_params.n_ubatch = 128;
     ctx_params.n_threads = std::max(2, static_cast<int>(threads));
     ctx_params.n_threads_batch = std::max(2, static_cast<int>(threads));
     g_context = llama_init_from_model(g_model, ctx_params);
@@ -137,7 +137,7 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
 
     for (size_t offset = 0; offset < tokens.size();) {
         const int32_t batch_size = static_cast<int32_t>(
-            std::min<size_t>(512, tokens.size() - offset));
+            std::min<size_t>(256, tokens.size() - offset));
         llama_batch batch = llama_batch_get_one(tokens.data() + offset, batch_size);
         if (llama_decode(g_context, batch) != 0) {
             return env->NewStringUTF("Не удалось обработать контекст. Попробуй сократить историю.");
