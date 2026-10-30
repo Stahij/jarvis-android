@@ -119,22 +119,17 @@ class UpdateManager(private val context: Context) {
     }
 
     private fun verifySigningCertificate(candidate: File) {
-        val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES
-            else @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
+        val flags = if (Build.VERSION.SDK_INT >= 28) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
         val installed = packageInfo(context.packageName, flags)
         val downloaded = context.packageManager.getPackageArchiveInfo(candidate.absolutePath, flags)
             ?: throw SecurityException("Android не распознал подпись APK")
 
-        val installedSignatures = if (Build.VERSION.SDK_INT >= 28) {
-            installed.signingInfo?.apkContentsSigners
-        } else {
-            @Suppress("DEPRECATION") installed.signatures
-        }
-        val candidateSignatures = if (Build.VERSION.SDK_INT >= 28) {
-            downloaded.signingInfo?.apkContentsSigners
-        } else {
-            @Suppress("DEPRECATION") downloaded.signatures
-        }
+        val installedSignatures = signingCertificates(installed)
+        val candidateSignatures = signingCertificates(downloaded)
         val installedHash = installedSignatures?.firstOrNull()?.toByteArray()?.let { sha256(it) }
         val candidateHash = candidateSignatures?.firstOrNull()?.toByteArray()?.let { sha256(it) }
         if (installedHash.isNullOrBlank() || installedHash != candidateHash) {
@@ -144,6 +139,10 @@ class UpdateManager(private val context: Context) {
             throw SecurityException("APK предназначен для другого приложения.")
         }
     }
+
+    @Suppress("DEPRECATION")
+    private fun signingCertificates(info: PackageInfo): Array<android.content.pm.Signature>? =
+        if (Build.VERSION.SDK_INT >= 28) info.signingInfo?.apkContentsSigners else info.signatures
 
     @Suppress("DEPRECATION")
     private fun packageInfo(name: String, flags: Int): PackageInfo =
