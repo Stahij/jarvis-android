@@ -129,6 +129,11 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
         vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
         tokens.data(), static_cast<int32_t>(tokens.size()), true, true);
     if (tokenized < 0) return env->NewStringUTF("Ошибка токенизации запроса.");
+    // Keep room for generated tokens inside the 4096-token context.
+    constexpr size_t MAX_PROMPT_TOKENS = 3584;
+    if (tokens.size() > MAX_PROMPT_TOKENS) {
+        tokens.erase(tokens.begin(), tokens.end() - MAX_PROMPT_TOKENS);
+    }
 
     for (size_t offset = 0; offset < tokens.size();) {
         const int32_t batch_size = static_cast<int32_t>(
