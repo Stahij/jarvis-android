@@ -13,6 +13,9 @@
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="true"
         android:supportsRtl="true">
+        <activity android:name=".GitHubRepositoryActivity" android:exported="false" />
+        <activity android:name=".OnlineKnowledgeActivity" android:exported="false" />
+
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
