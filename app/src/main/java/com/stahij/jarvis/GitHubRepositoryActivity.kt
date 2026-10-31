@@ -19,7 +19,7 @@ import java.util.concurrent.Executors
 /** Read-only GitHub browser. Repository content is always treated as untrusted data. */
 class GitHubRepositoryActivity : Activity() {
     private val executor = Executors.newSingleThreadExecutor()
-    private val background = Color.rgb(5, 10, 22)
+    private val screenBackgroundColor = Color.rgb(5, 10, 22)
     private val accent = Color.rgb(64, 231, 255)
     private lateinit var content: LinearLayout
     private lateinit var status: TextView
@@ -38,7 +38,7 @@ class GitHubRepositoryActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(12), dp(14), dp(12))
-            setBackgroundColor(background)
+            setBackgroundColor(screenBackgroundColor)
         }
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -61,7 +61,7 @@ class GitHubRepositoryActivity : Activity() {
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
             hint = "owner/repository"
-            singleLine = true
+            setSingleLine(true)
             setPadding(dp(10), dp(6), dp(10), dp(6))
             setBackgroundColor(Color.rgb(15, 27, 43))
         }
