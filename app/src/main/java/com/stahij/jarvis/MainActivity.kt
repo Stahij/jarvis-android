@@ -151,6 +151,14 @@ class MainActivity : Activity() {
                 showModelScreen()
                 true
             }
+            menu.add("Интернет и знания").setOnMenuItemClickListener {
+                startActivity(Intent(this@MainActivity, OnlineKnowledgeActivity::class.java))
+                true
+            }
+            menu.add("GitHub • репозиторий").setOnMenuItemClickListener {
+                startActivity(Intent(this@MainActivity, GitHubRepositoryActivity::class.java))
+                true
+            }
             menu.add("Проверка обновлений").setOnMenuItemClickListener {
                 checkForUpdates(manual = true)
                 true
