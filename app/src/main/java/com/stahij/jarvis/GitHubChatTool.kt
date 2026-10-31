@@ -34,7 +34,7 @@ object GitHubChatTool {
                 .joinToString("/") { URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
             val json = getJson("https://api.github.com/repos/$repo/contents/$safePath?ref=" +
                 URLEncoder.encode(branch, "UTF-8"))
-            val encoded = json.optString("content").replace("\\n", "")
+            val encoded = json.optString("content").replace("\n", "")
             val bytes = try { android.util.Base64.decode(encoded, android.util.Base64.DEFAULT) }
                 catch (_: Exception) { ByteArray(0) }
             val body = if (bytes.isNotEmpty()) String(bytes, Charsets.UTF_8) else
