@@ -38,6 +38,7 @@ class MainActivity : Activity() {
     private var modelReady = false
     private var voiceReply = false
     private var voicePendingPermission = false
+    private var activePersona = "Общий помощник"
     private var tts: TextToSpeech? = null
     private val maxHistoryMessages = 24
     private val prefs by lazy { getSharedPreferences("jarvis", MODE_PRIVATE) }
@@ -48,6 +49,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = bg
         window.navigationBarColor = bg
+        activePersona = prefs.getString("active_persona", "Общий помощник") ?: "Общий помощник"
         buildUi()
         tts = TextToSpeech(this) { }
         loadHistory()
@@ -147,6 +149,14 @@ class MainActivity : Activity() {
 
     private fun showMainMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
+            menu.add("Роль: $activePersona").setOnMenuItemClickListener {
+                showPersonaPicker()
+                true
+            }
+            menu.add("Улучшить запрос").setOnMenuItemClickListener {
+                enhanceCurrentPrompt()
+                true
+            }
             menu.add("Модель").setOnMenuItemClickListener {
                 showModelScreen()
                 true
@@ -543,6 +553,7 @@ class MainActivity : Activity() {
 
         // The model runs locally through llama.cpp. Network access is optional and must
         // never be described as a requirement for ordinary chat or local generation.
+        val personaInstruction = personaPrompt(activePersona)
         val systemInstruction = """
             Ты — Jarvis, персональный ИИ-помощник пользователя.
             Сейчас ты работаешь как локальная языковая модель внутри Android-приложения через llama.cpp.
@@ -555,7 +566,7 @@ class MainActivity : Activity() {
             Не выдумывай, будто ты уже выполнил поиск, открыл сайт или проверил свежие данные.
             Если актуальные сведения без сети недоступны, честно скажи об этом.
             Отвечай по-русски, ясно, доброжелательно и по существу.
-        """.trimIndent()
+        """.trimIndent() + "\n\nТЕКУЩАЯ РОЛЬ: $activePersona\n$personaInstruction"
         // В модель отправляем только последние 8 реплик: сохранённая история остаётся полной,
         // но каждый новый запрос не заставляет движок повторно обрабатывать весь диалог.
         val promptStart = (history.length() - 8).coerceAtLeast(0)
@@ -620,6 +631,60 @@ class MainActivity : Activity() {
     }
 
     /** Retrieves a small set of relevant notes from the app-private knowledge store. */
+
+    private fun personaPrompt(name: String): String = when (name) {
+        "Переводчик" -> "Переводи точно и естественно. Сохраняй смысл, тон и структуру. Если язык не указан, определи его по контексту и уточни целевой язык при необходимости."
+        "Программист" -> "Работай как опытный разработчик: сначала уточняй требования при существенной неоднозначности, предлагай проверяемые решения, учитывай ошибки и безопасность. Не утверждай, что запускал код, если запуска не было."
+        "Собеседник" -> "Будь живым, внимательным и доброжелательным собеседником. Поддерживай естественный диалог, не превращай каждый ответ в инструкцию."
+        "Флирт" -> "Общайся легко, тепло и игриво, уважая границы собеседника. Не дави и не выдавай себя за реального человека."
+        "Поддержка" -> "Помогай человеку осмыслить ситуацию бережно, задавай открытые вопросы и не ставь диагнозов. Ты не заменяешь психолога или медицинского специалиста."
+        "Автор" -> "Помогай писать и редактировать тексты. Сохраняй авторский замысел, предлагай ясные формулировки и отмечай существенные правки."
+        else -> "Будь универсальным персональным помощником: сначала отвечай прямо, затем при необходимости добавляй практические шаги."
+    }
+
+    private fun showPersonaPicker() {
+        val options = arrayOf("Общий помощник", "Переводчик", "Программист", "Собеседник", "Флирт", "Поддержка", "Автор")
+        AlertDialog.Builder(this)
+            .setTitle("Выбери роль Jarvis")
+            .setSingleChoiceItems(options, options.indexOf(activePersona).coerceAtLeast(0)) { dialog, which ->
+                activePersona = options[which]
+                prefs.edit().putString("active_persona", activePersona).apply()
+                dialog.dismiss()
+                status.text = "РОЛЬ: $activePersona"
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
+    }
+
+    private fun enhanceCurrentPrompt() {
+        val source = input.text.toString().trim()
+        if (source.isBlank()) {
+            AlertDialog.Builder(this).setTitle("Улучшение запроса")
+                .setMessage("Сначала напиши короткий запрос в поле ввода.")
+                .setPositiveButton("Понятно", null).show()
+            return
+        }
+        val enhanced = when (activePersona) {
+            "Программист" -> "Разбери задачу: $source\n\nДай конкретное решение, объясни ключевые решения, учти крайние случаи и возможные ошибки. Если данных недостаточно — сначала задай уточняющий вопрос. Не утверждай, что код проверен запуском, если он не запускался."
+            "Переводчик" -> "Выполни перевод или помоги определить нужный перевод для запроса: $source\n\nСохрани смысл, естественность и тон оригинала. Если целевой язык неясен, сначала уточни его."
+            "Автор" -> "Помоги подготовить или улучшить текст по запросу: $source\n\nСохрани исходный замысел и предложи ясный, естественный вариант."
+            else -> "Помоги с запросом: $source\n\nСначала дай прямой ответ. Если важной информации не хватает, задай один конкретный уточняющий вопрос. Предложи практические следующие шаги, если они уместны."
+        }
+        val editor = EditText(this).apply {
+            setText(enhanced)
+            setTextColor(Color.WHITE)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setBackgroundColor(Color.rgb(15, 27, 43))
+            minLines = 4
+        }
+        AlertDialog.Builder(this).setTitle("Улучшенный запрос")
+            .setMessage("Проверь формулировку. Исходный текст не изменится, пока ты не подтвердишь.")
+            .setView(editor)
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Применить") { _, _ -> input.setText(editor.text.toString()) }
+            .show()
+    }
+
     private fun buildSavedKnowledgeContext(message: String): String {
         return try {
             val entries = JSONArray(getSharedPreferences("jarvis_knowledge", MODE_PRIVATE)
@@ -689,6 +754,32 @@ class MainActivity : Activity() {
             setTextColor(Color.rgb(229, 241, 248))
             setPadding(0, dp(3), 0, 0)
         })
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+        }
+        fun action(label: String, callback: () -> Unit) {
+            actions.addView(TextView(this).apply {
+                this.text = label
+                textSize = 11f
+                setTextColor(cyan)
+                setPadding(dp(8), dp(7), dp(8), dp(3))
+                setOnClickListener { callback() }
+            })
+        }
+        if (outgoing) {
+            action("Копировать") {
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Jarvis", text))
+                status.text = "СКОПИРОВАНО"
+            }
+        } else {
+            action("Озвучить") {
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_message_${System.currentTimeMillis()}")
+            }
+            action("Стоп") { tts?.stop() }
+        }
+        bubble.addView(actions)
         val lp = LinearLayout.LayoutParams(-1, -2).apply {
             bottomMargin = dp(8)
             leftMargin = if (outgoing) dp(28) else 0
