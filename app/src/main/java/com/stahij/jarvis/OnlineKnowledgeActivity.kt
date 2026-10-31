@@ -57,7 +57,7 @@ class OnlineKnowledgeActivity : Activity() {
             hint = "Что нужно найти?"
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
-            singleLine = true
+            setSingleLine(true)
             setPadding(dp(10), dp(6), dp(10), dp(6))
             setBackgroundColor(Color.rgb(15, 27, 43))
         }
