@@ -673,7 +673,18 @@ class MainActivity : Activity() {
                             "\nИспользуй только относящиеся к вопросу факты и указывай, если данных недостаточно."
                     } else ""
                 val augmentedContents = contents.copyOf().also { it[0] = augmentedSystem }
-                val answer = NativeLlm.nativeGenerate(roles, augmentedContents, 512).trim()
+                val generatedAnswer = NativeLlm.nativeGenerate(roles, augmentedContents, 512).trim()
+                // Small local models may ignore a long repository context and fall back
+                // to generic advice. Never present that as repository analysis: provide
+                // a deterministic, provenance-backed receipt of what the tool actually read.
+                val answer = if (toolContext.contains("GitHub: ДАННЫЕ ПОЛУЧЕНЫ УСПЕШНО") &&
+                    (generatedAnswer.isBlank() ||
+                     generatedAnswer.contains("откройте github", ignoreCase = true) ||
+                     generatedAnswer.contains("откройте репозиторий", ignoreCase = true) ||
+                     generatedAnswer.contains("перейдите на github", ignoreCase = true) ||
+                     generatedAnswer.contains("я не могу получить доступ", ignoreCase = true))) {
+                    GitHubChatTool.buildReadReceipt(toolContext, generatedAnswer)
+                } else generatedAnswer
                 runOnUiThread {
                     history.put(JSONObject().put("role", "assistant").put("content", answer))
                     trimHistory()
