@@ -19,15 +19,27 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.text.Editable
+import android.text.TextWatcher
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : Activity() {
     private val bg = Color.rgb(5, 10, 22)
     private val cyan = Color.rgb(64, 231, 255)
     private val executor = Executors.newSingleThreadExecutor()
+    private val promptScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+    private val promptRevision = AtomicInteger(0)
+    private var promptTask: java.util.concurrent.ScheduledFuture<*>? = null
+    private lateinit var promptSuggestionPanel: LinearLayout
+    private lateinit var promptSuggestionText: TextView
+    private lateinit var promptApplyButton: Button
+    private var latestPromptSuggestion = ""
     private lateinit var messages: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var input: EditText
@@ -144,6 +156,52 @@ class MainActivity : Activity() {
             leftMargin = dp(6)
         })
         root.addView(row)
+        promptSuggestionPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(9), dp(12), dp(9))
+            setBackgroundColor(Color.rgb(12, 36, 53))
+            visibility = View.GONE
+        }
+        promptSuggestionText = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.rgb(220, 239, 246))
+        }
+        promptSuggestionPanel.addView(promptSuggestionText)
+        val suggestionActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+        }
+        promptApplyButton = Button(this).apply {
+            text = "Применить"
+            isAllCaps = false
+            setTextColor(Color.BLACK)
+            setBackgroundColor(cyan)
+            setOnClickListener {
+                if (latestPromptSuggestion.isNotBlank()) {
+                    input.setText(latestPromptSuggestion)
+                    input.setSelection(input.text.length)
+                    hidePromptSuggestion()
+                }
+            }
+        }
+        val dismissSuggestion = Button(this).apply {
+            text = "×"
+            textSize = 18f
+            setTextColor(cyan)
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener { hidePromptSuggestion() }
+        }
+        suggestionActions.addView(promptApplyButton)
+        suggestionActions.addView(dismissSuggestion)
+        promptSuggestionPanel.addView(suggestionActions)
+        root.addView(promptSuggestionPanel)
+        input.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                schedulePromptAssistance(s?.toString().orEmpty())
+            }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
         setContentView(root)
     }
 
@@ -151,10 +209,6 @@ class MainActivity : Activity() {
         PopupMenu(this, anchor).apply {
             menu.add("Роль: $activePersona").setOnMenuItemClickListener {
                 showPersonaPicker()
-                true
-            }
-            menu.add("Улучшить запрос").setOnMenuItemClickListener {
-                enhanceCurrentPrompt()
                 true
             }
             menu.add("Модель").setOnMenuItemClickListener {
@@ -656,33 +710,53 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun enhanceCurrentPrompt() {
-        val source = input.text.toString().trim()
-        if (source.isBlank()) {
-            AlertDialog.Builder(this).setTitle("Улучшение запроса")
-                .setMessage("Сначала напиши короткий запрос в поле ввода.")
-                .setPositiveButton("Понятно", null).show()
+    /**
+     * Runs a lightweight local-model rewrite after the user pauses typing.
+     * The original draft is never changed automatically.
+     */
+    private fun schedulePromptAssistance(draft: String) {
+        val revision = promptRevision.incrementAndGet()
+        promptTask?.cancel(false)
+        if (draft.trim().length < 12 || !modelReady || isSending) {
+            hidePromptSuggestion()
             return
         }
-        val enhanced = when (activePersona) {
-            "Программист" -> "Разбери задачу: $source\n\nДай конкретное решение, объясни ключевые решения, учти крайние случаи и возможные ошибки. Если данных недостаточно — сначала задай уточняющий вопрос. Не утверждай, что код проверен запуском, если он не запускался."
-            "Переводчик" -> "Выполни перевод или помоги определить нужный перевод для запроса: $source\n\nСохрани смысл, естественность и тон оригинала. Если целевой язык неясен, сначала уточни его."
-            "Автор" -> "Помоги подготовить или улучшить текст по запросу: $source\n\nСохрани исходный замысел и предложи ясный, естественный вариант."
-            else -> "Помоги с запросом: $source\n\nСначала дай прямой ответ. Если важной информации не хватает, задай один конкретный уточняющий вопрос. Предложи практические следующие шаги, если они уместны."
-        }
-        val editor = EditText(this).apply {
-            setText(enhanced)
-            setTextColor(Color.WHITE)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            setBackgroundColor(Color.rgb(15, 27, 43))
-            minLines = 4
-        }
-        AlertDialog.Builder(this).setTitle("Улучшенный запрос")
-            .setMessage("Проверь формулировку. Исходный текст не изменится, пока ты не подтвердишь.")
-            .setView(editor)
-            .setNegativeButton("Отмена", null)
-            .setPositiveButton("Применить") { _, _ -> input.setText(editor.text.toString()) }
-            .show()
+        promptTask = promptScheduler.schedule({
+            executor.execute {
+                try {
+                    val instruction = """
+                        Ты — фоновый редактор запросов Jarvis.
+                        Улучши ясность и конкретность черновика пользователя, сохранив его намерение,
+                        факты, ограничения, стиль и язык. Не выполняй запрос и не отвечай на него.
+                        Не добавляй выдуманные детали, требования или факты.
+                        Верни только улучшенную формулировку, без пояснений и кавычек.
+                        Если черновик уже ясен, верни его без существенных изменений.
+                    """.trimIndent()
+                    val suggestion = NativeLlm.nativeGenerate(
+                        arrayOf("system", "user"),
+                        arrayOf(instruction, draft.trim()),
+                        192
+                    ).trim().removeSurrounding("\"").trim()
+                    if (suggestion.isNotBlank() && suggestion != draft.trim() &&
+                        promptRevision.get() == revision) {
+                        runOnUiThread {
+                            if (promptRevision.get() == revision && input.text.toString().trim() == draft.trim()) {
+                                latestPromptSuggestion = suggestion
+                                promptSuggestionText.text = "Вариант формулировки:\\n$suggestion"
+                                promptSuggestionPanel.visibility = View.VISIBLE
+                            }
+                        }
+                    }
+                } catch (_: Throwable) {
+                    // Background assistance is optional; it must never interrupt typing or chat.
+                }
+            }
+        }, 1100, TimeUnit.MILLISECONDS)
+    }
+
+    private fun hidePromptSuggestion() {
+        if (::promptSuggestionPanel.isInitialized) promptSuggestionPanel.visibility = View.GONE
+        latestPromptSuggestion = ""
     }
 
     private fun buildSavedKnowledgeContext(message: String): String {
@@ -753,6 +827,7 @@ class MainActivity : Activity() {
             textSize = 15f
             setTextColor(Color.rgb(229, 241, 248))
             setPadding(0, dp(3), 0, 0)
+            setTextIsSelectable(true)
         })
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -767,17 +842,11 @@ class MainActivity : Activity() {
                 setOnClickListener { callback() }
             })
         }
-        if (outgoing) {
-            action("Копировать") {
-                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Jarvis", text))
-                status.text = "СКОПИРОВАНО"
-            }
-        } else {
-            action("Озвучить") {
+        if (!outgoing) {
+            action("▶") {
                 tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_message_${System.currentTimeMillis()}")
             }
-            action("Стоп") { tts?.stop() }
+            action("■") { tts?.stop() }
         }
         bubble.addView(actions)
         val lp = LinearLayout.LayoutParams(-1, -2).apply {
@@ -824,6 +893,8 @@ class MainActivity : Activity() {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
+        promptTask?.cancel(true)
+        promptScheduler.shutdownNow()
         executor.shutdownNow()
         tts?.stop()
         tts?.shutdown()
