@@ -14,8 +14,8 @@ import java.net.URLEncoder
 object GitHubChatTool {
     private const val DEFAULT_REPOSITORY = "Stahij/jarvis-android"
     private const val DEFAULT_BRANCH = "feature/local-brain-and-updater"
-    private const val MAX_FILE_CHARS = 9000
-    private const val MAX_TOTAL_CHARS = 22000
+    private const val MAX_FILE_CHARS = 4500
+    private const val MAX_TOTAL_CHARS = 10500
     private const val MAX_FILES_TO_READ = 8
 
     fun shouldUse(message: String): Boolean {
