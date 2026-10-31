@@ -14,6 +14,7 @@
         android:usesCleartextTraffic="true"
         android:supportsRtl="true">
         <activity android:name=".GitHubRepositoryActivity" android:exported="false" />
+        <activity android:name=".GitHubAccessActivity" android:exported="false" />
         <activity android:name=".OnlineKnowledgeActivity" android:exported="false" />
 
         <activity android:name=".MainActivity" android:exported="true">
