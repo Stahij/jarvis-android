@@ -1,5 +1,6 @@
 package com.stahij.jarvis
 
+import android.content.Context
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,7 +29,7 @@ object GitHubChatTool {
         return explicit.any { value.contains(it) }
     }
 
-    fun loadContext(message: String): String {
+    fun loadContext(message: String, context: Context? = null): String {
         val repo = Regex("(?:репозиторий|репозитория|repo)\\s+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)",
             RegexOption.IGNORE_CASE).find(message)?.groupValues?.getOrNull(1) ?: DEFAULT_REPOSITORY
         val branch = Regex("(?:ветка|branch)\\s+([A-Za-z0-9_./-]+)", RegexOption.IGNORE_CASE)
@@ -38,7 +39,7 @@ object GitHubChatTool {
             RegexOption.IGNORE_CASE).find(message)?.groupValues?.getOrNull(1)
 
         if (!requestedPath.isNullOrBlank()) {
-            val file = fetchFile(repo, branch, requestedPath)
+            val file = fetchFile(repo, branch, requestedPath, context)
             return buildString {
                 appendLine("GitHub: УСПЕШНО ПРОЧИТАН ФАЙЛ")
                 appendLine("Репозиторий: $repo")
@@ -54,7 +55,7 @@ object GitHubChatTool {
 
         val treeUrl = "https://api.github.com/repos/$repo/git/trees/" +
             URLEncoder.encode(branch, "UTF-8") + "?recursive=1"
-        val treeJson = getJson(treeUrl)
+        val treeJson = getJson(treeUrl, context)
         if (treeJson.optBoolean("truncated")) {
             throw IllegalStateException("GitHub вернул неполное дерево репозитория. Нужен поэтапный обход папок.")
         }
@@ -83,7 +84,7 @@ object GitHubChatTool {
         for (path in selected) {
             if (remaining <= 500) break
             try {
-                val file = fetchFile(repo, branch, path)
+                val file = fetchFile(repo, branch, path, context)
                 val body = decodeContent(file)
                 if (body.isBlank()) continue
                 val excerpt = body.take(minOf(MAX_FILE_CHARS, remaining - 300))
@@ -129,12 +130,12 @@ object GitHubChatTool {
         return selected.take(MAX_FILES_TO_READ)
     }
 
-    private fun fetchFile(repo: String, branch: String, path: String): JSONObject {
+    private fun fetchFile(repo: String, branch: String, path: String, context: Context?): JSONObject {
         val encodedPath = path.split("/").joinToString("/") {
             URLEncoder.encode(it, "UTF-8").replace("+", "%20")
         }
         return getJson("https://api.github.com/repos/$repo/contents/$encodedPath?ref=" +
-            URLEncoder.encode(branch, "UTF-8"))
+            URLEncoder.encode(branch, "UTF-8"), context)
     }
 
     private fun decodeContent(file: JSONObject): String {
@@ -147,8 +148,8 @@ object GitHubChatTool {
         }
     }
 
-    private fun getJson(address: String): JSONObject {
-        val connection = open(address)
+    private fun getJson(address: String, context: Context?): JSONObject {
+        val connection = open(address, context)
         try {
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             return JSONObject(body)
@@ -157,7 +158,7 @@ object GitHubChatTool {
         }
     }
 
-    private fun open(address: String): HttpURLConnection {
+    private fun open(address: String, context: Context?): HttpURLConnection {
         val connection = URL(address).openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
         connection.connectTimeout = 12000
@@ -166,6 +167,8 @@ object GitHubChatTool {
         connection.setRequestProperty("Accept", "application/vnd.github+json")
         connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
         connection.setRequestProperty("User-Agent", "Jarvis-Android")
+        val savedToken = context?.let { GitHubTokenStore.load(it) }
+        if (!savedToken.isNullOrBlank()) connection.setRequestProperty("Authorization", "Bearer $savedToken")
         val code = connection.responseCode
         if (code !in 200..299) {
             val detail = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
