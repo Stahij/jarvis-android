@@ -219,6 +219,10 @@ class MainActivity : Activity() {
                 startActivity(Intent(this@MainActivity, OnlineKnowledgeActivity::class.java))
                 true
             }
+            menu.add("GitHub • управление и запись").setOnMenuItemClickListener {
+                startActivity(Intent(this@MainActivity, GitHubAccessActivity::class.java))
+                true
+            }
             menu.add("GitHub • репозиторий").setOnMenuItemClickListener {
                 startActivity(Intent(this@MainActivity, GitHubRepositoryActivity::class.java))
                 true
