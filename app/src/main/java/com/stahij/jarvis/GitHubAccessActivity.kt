@@ -101,7 +101,7 @@ class GitHubAccessActivity : Activity() {
         setTextColor(Color.WHITE)
         setHintTextColor(Color.GRAY)
         textSize = 14f
-        singleLine = !password
+        setSingleLine(!password)
         setPadding(dp(10), dp(8), dp(10), dp(8))
         setBackgroundColor(Color.rgb(15, 27, 43))
     }
