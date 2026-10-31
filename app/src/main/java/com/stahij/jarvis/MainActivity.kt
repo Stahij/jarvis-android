@@ -227,6 +227,10 @@ class MainActivity : Activity() {
                 startActivity(Intent(this@MainActivity, GitHubRepositoryActivity::class.java))
                 true
             }
+            menu.add("Диагностика и журнал").setOnMenuItemClickListener {
+                JarvisDiagnostics.show(this@MainActivity)
+                true
+            }
             menu.add("Проверка обновлений").setOnMenuItemClickListener {
                 checkForUpdates(manual = true)
                 true
@@ -518,6 +522,8 @@ class MainActivity : Activity() {
     }
 
     private fun loadLocalModel(file: File) {
+        JarvisDiagnostics.event(this, "model_load_start", "file=${file.name}; size=${file.length() / 1048576L}MB")
+        val loadStartedAt = android.os.SystemClock.elapsedRealtime()
         modelReady = false
         sendButton.isEnabled = false
         status.text = "ЗАПУСКАЮ МОДЕЛЬ..."
@@ -526,15 +532,18 @@ class MainActivity : Activity() {
                 val error = NativeLlm.nativeLoadModel(file.absolutePath, 4, 4096)
                 runOnUiThread {
                     if (error == null) {
+                        JarvisDiagnostics.event(this, "model_load_success", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}")
                         modelReady = true
                         sendButton.isEnabled = true
                         status.text = "ГОТОВ К ДИАЛОГУ"
                     } else {
+                        JarvisDiagnostics.event(this, "model_load_error", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}; error=${error.take(240)}")
                         status.text = "НЕ УДАЛОСЬ ЗАГРУЗИТЬ МОДЕЛЬ"
                         addBubble("Система", error, false)
                     }
                 }
             } catch (e: Throwable) {
+                JarvisDiagnostics.event(this, "model_load_exception", e.javaClass.simpleName + ": " + (e.message ?: ""))
                 runOnUiThread {
                     status.text = "ОШИБКА ВСТРОЕННОГО ДВИЖКА"
                     addBubble("Система", e.message ?: e.javaClass.simpleName, false)
@@ -673,7 +682,13 @@ class MainActivity : Activity() {
                             "\nИспользуй только относящиеся к вопросу факты и указывай, если данных недостаточно."
                     } else ""
                 val augmentedContents = contents.copyOf().also { it[0] = augmentedSystem }
+                val generationStartedAt = android.os.SystemClock.elapsedRealtime()
+                val promptChars = augmentedContents.sumOf { it.length }
+                JarvisDiagnostics.event(this@MainActivity, "generation_start", "messages=${roles.size}; prompt_chars=$promptChars; max_output_tokens=512")
                 val generatedAnswer = NativeLlm.nativeGenerate(roles, augmentedContents, 512).trim()
+                val generationMs = android.os.SystemClock.elapsedRealtime() - generationStartedAt
+                val approxWords = generatedAnswer.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+                JarvisDiagnostics.event(this@MainActivity, "generation_end", "duration_ms=$generationMs; output_chars=${generatedAnswer.length}; approx_words=$approxWords; approx_words_per_sec=${if (generationMs > 0) approxWords * 1000L / generationMs else 0}")
                 // Small local models may ignore a long repository context and fall back
                 // to generic advice. Never present that as repository analysis: provide
                 // a deterministic, provenance-backed receipt of what the tool actually read.
@@ -693,6 +708,7 @@ class MainActivity : Activity() {
                     finishSending("ГОТОВ К ДИАЛОГУ")
                 }
             } catch (ex: Throwable) {
+                JarvisDiagnostics.event(this@MainActivity, "generation_error", ex.javaClass.simpleName + ": " + (ex.message ?: ""))
                 runOnUiThread {
                     addBubble("Система", ex.message ?: "Ошибка локальной генерации", false)
                     voiceReply = false
