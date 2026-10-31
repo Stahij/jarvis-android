@@ -660,7 +660,7 @@ class MainActivity : Activity() {
                 val toolContext = if (GitHubChatTool.shouldUse(prompt)) {
                     runOnUiThread { status.text = "ИЗУЧАЮ GITHUB..." }
                     try {
-                        GitHubChatTool.loadContext(prompt)
+                        GitHubChatTool.loadContext(prompt, this@MainActivity)
                     } catch (toolError: Exception) {
                         "GitHub-инструмент не смог получить данные: ${toolError.message}. Не утверждай, что репозиторий изучен."
                     }
