@@ -596,9 +596,9 @@ class MainActivity : Activity() {
                 val knowledgeContext = buildSavedKnowledgeContext(prompt)
                 val augmentedSystem = systemInstruction +
                     if (toolContext.isNotBlank() || knowledgeContext.isNotBlank()) {
-                        "\\n\\nДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ДЛЯ ТЕКУЩЕГО ЗАПРОСА:\\n" +
-                            knowledgeContext + "\\n" + toolContext +
-                            "\\nИспользуй только относящиеся к вопросу факты и указывай, если данных недостаточно."
+                        "\n\nДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ДЛЯ ТЕКУЩЕГО ЗАПРОСА:\n" +
+                            knowledgeContext + "\n" + toolContext +
+                            "\nИспользуй только относящиеся к вопросу факты и указывай, если данных недостаточно."
                     } else ""
                 val augmentedContents = contents.copyOf().also { it[0] = augmentedSystem }
                 val answer = NativeLlm.nativeGenerate(roles, augmentedContents, 512).trim()
