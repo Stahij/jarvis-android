@@ -107,6 +107,35 @@ object GitHubChatTool {
         return result.toString()
     }
 
+    /**
+     * A truthful fallback for small models that ignore the injected repository context.
+     * It reports tool-provenance only and never pretends that the model completed a code review.
+     */
+    fun buildReadReceipt(context: String, modelFallback: String = ""): String {
+        val repository = Regex("(?m)^Репозиторий: (.+)$").find(context)?.groupValues?.get(1) ?: "неизвестен"
+        val branch = Regex("(?m)^Ветка: (.+)$").find(context)?.groupValues?.get(1) ?: "неизвестна"
+        val count = Regex("(?m)^Всего файлов в дереве: (\\d+)").find(context)?.groupValues?.get(1) ?: "неизвестно"
+        val readLine = Regex("(?m)^ФАКТИЧЕСКИ ПРОЧИТАНО: (.+)$").find(context)?.groupValues?.get(1)
+            ?: Regex("(?m)^Файл: (.+)$").find(context)?.groupValues?.get(1)
+        val files = readLine?.split(", ")?.filter { it.isNotBlank() }.orEmpty()
+        return buildString {
+            appendLine("GitHub подключён, данные действительно получены.")
+            appendLine("Репозиторий: $repository")
+            appendLine("Ветка: $branch")
+            appendLine("Файлов в дереве: $count")
+            appendLine("Подтверждённо прочитано файлов: ${files.size}")
+            files.forEach { appendLine("• $it") }
+            appendLine()
+            appendLine("Важно: локальная модель не сформировала надёжный анализ этих материалов и попыталась ответить общим советом. Я не буду выдавать это за анализ кода.")
+            appendLine("Следующий шаг: запросить конкретные файлы по одному и передать их модели отдельными порциями.")
+            if (modelFallback.isNotBlank()) {
+                appendLine()
+                appendLine("Ответ модели (не подтверждён как анализ репозитория):")
+                appendLine(modelFallback.take(700))
+            }
+        }.trim()
+    }
+
     private fun selectImportantFiles(paths: List<String>): List<String> {
         val priority = listOf(
             "README.md",
