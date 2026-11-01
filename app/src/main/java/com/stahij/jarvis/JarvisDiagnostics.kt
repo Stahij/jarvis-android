@@ -75,8 +75,8 @@ object JarvisDiagnostics {
         val thermal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) power.currentThermalStatus else -1
         val pss = am.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid())).firstOrNull()?.totalPss
         val stat = StatFs(context.filesDir.absolutePath)
-        val model = File(File(context.filesDir, "models"), "qwen-coder.gguf")
-        val modelState = when { model.length() > 500L * 1024L * 1024L -> "ready"; model.exists() -> "incomplete"; else -> "missing" }
+        val model = File(File(context.filesDir, "models"), "qwen2.5-3b-instruct-q4_k_m.gguf")
+        val modelState = when { model.length() > 1_700L * 1024L * 1024L -> "ready"; model.exists() -> "incomplete"; else -> "missing" }
         return JSONObject()
             .put("timestamp", System.currentTimeMillis())
             .put("cpu_percent", cpuPercent() ?: JSONObject.NULL)
@@ -92,7 +92,7 @@ object JarvisDiagnostics {
             .put("battery_plugged", plugged != 0).put("thermal_status", thermal)
             .put("storage_free_bytes", stat.availableBytes).put("storage_total_bytes", stat.totalBytes)
             .put("model_state", modelState).put("model_size_bytes", if (model.exists()) model.length() else 0L)
-            .put("gpu_enabled", false).put("engine_cpu_threads", 4)
+            .put("gpu_enabled", false).put("engine_cpu_threads", 6)
     }
 
     private fun liveText(context: Context): String {
@@ -114,7 +114,7 @@ object JarvisDiagnostics {
             append("Тепловой статус Android: ").append(thermalLabel(s.optInt("thermal_status", -1))).append("\n")
             append("Хранилище свободно: ").append(mb("storage_free_bytes")).append(" / ").append(mb("storage_total_bytes")).append(" МБ\n")
             append("Модель: ").append(s.optString("model_state")).append("\n")
-            append("GPU llama.cpp: отключён\nПотоки движка: 4\n")
+            append("GPU llama.cpp: отключён\nПотоки движка: 6\n")
             append("\nПримечание: температура батареи не является температурой CPU/SoC. CPU — оценка по /proc/stat, если доступна.")
         }
     }
@@ -126,7 +126,7 @@ object JarvisDiagnostics {
     }
 
     fun report(context: Context): String {
-        val out = StringBuilder("JARVIS • ДИАГНОСТИКА 1.5.3\n")
+        val out = StringBuilder("JARVIS • ДИАГНОСТИКА 1.5.4\n")
         out.append("Устройство: ").append(Build.MANUFACTURER).append(" ").append(Build.MODEL).append("\n")
         out.append("Android: ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(")\n\n")
         out.append(liveText(context)).append("\n\nПОСЛЕДНИЕ СОБЫТИЯ\n")
@@ -143,7 +143,7 @@ object JarvisDiagnostics {
 
     fun reportJson(context: Context): String {
         val s = snapshot(context)
-        s.put("app", "Jarvis").put("version", "1.5.3")
+        s.put("app", "Jarvis").put("version", "1.5.4")
         s.put("device", JSONObject().put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL).put("android", Build.VERSION.RELEASE).put("api", Build.VERSION.SDK_INT))
         s.put("events", eventList(context))
         return s.toString(2)
