@@ -58,7 +58,8 @@ class MainActivity : Activity() {
     private val maxHistoryMessages = 24
     private val prefs by lazy { getSharedPreferences("jarvis", MODE_PRIVATE) }
     private val history = JSONArray()
-    private val modelFile by lazy { File(File(filesDir, "models"), "qwen-coder.gguf") }
+    private val modelFile by lazy { File(File(filesDir, "models"), "qwen2.5-3b-instruct-q4_k_m.gguf") }
+    private val legacyModelFile by lazy { File(File(filesDir, "models"), "qwen-coder.gguf") }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,7 +110,7 @@ class MainActivity : Activity() {
         root.addView(header)
 
         status = TextView(this).apply {
-            text = "ВСТРОЕННЫЙ ДВИЖОК • QWEN"
+            text = "ВСТРОЕННЫЙ ДВИЖОК • QWEN 2.5 3B"
             textSize = 11f
             setTextColor(Color.rgb(104, 160, 181))
             setPadding(0, dp(4), 0, dp(10))
@@ -275,7 +276,7 @@ class MainActivity : Activity() {
                 setOnClickListener { action() }
             }, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(12) })
         }
-        actionButton("Скачать Qwen • около 1,1 ГБ") { confirmQwenDownload() }
+        actionButton("Скачать Qwen 2.5 3B • около 1,93 ГБ") { confirmQwenDownload() }
         actionButton("Импортировать GGUF-файл") { chooseModel() }
         actionButton("Назад") { modelScreenDialog?.dismiss() }
         modelScreenDialog = AlertDialog.Builder(this).setView(panel).create()
@@ -415,7 +416,7 @@ class MainActivity : Activity() {
         if (modelFile.exists() && modelFile.length() > 500L * 1024L * 1024L) {
             AlertDialog.Builder(this)
                 .setTitle("Модель уже загружена")
-                .setMessage("Заменить текущую модель Qwen? Это потребует повторной загрузки примерно 1,1 ГБ.")
+                .setMessage("Заменить текущую модель? Будет загружена Qwen2.5-3B-Instruct Q4_K_M размером около 1,93 ГБ.")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Заменить") { _, _ -> downloadQwenModel() }
                 .show()
@@ -423,7 +424,7 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Загрузить мозг Jarvis")
-            .setMessage("Qwen2.5-Coder-1.5B-Instruct Q4_0. Размер около 1,1 ГБ. Модель будет храниться в памяти приложения и работать локально, без отправки запросов внешним ИИ.")
+            .setMessage("Qwen2.5-3B-Instruct Q4_K_M. Размер около 1,93 ГБ. Модель будет храниться в памяти приложения и работать локально, без отправки запросов внешним ИИ. Для загрузки потребуется свободное место и интернет; после загрузки интернет для обычного чата не нужен.")
             .setNegativeButton("Позже", null)
             .setPositiveButton("Загрузить") { _, _ -> downloadQwenModel() }
             .show()
@@ -438,7 +439,7 @@ class MainActivity : Activity() {
                 if (!directory.exists() && !directory.mkdirs()) {
                     throw IllegalStateException("Не удалось создать папку модели")
                 }
-                val part = File(directory, "qwen-coder.gguf.part")
+                val part = File(directory, "qwen2.5-3b-instruct-q4_k_m.gguf.part")
                 val url = java.net.URL(QWEN_MODEL_URL)
                 var offset = if (part.exists()) part.length() else 0L
                 val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
@@ -474,8 +475,8 @@ class MainActivity : Activity() {
                                     lastUpdate = now
                                     val percent = total?.let { ((downloaded * 100L) / it).coerceIn(0L, 100L) }
                                     runOnUiThread {
-                                        status.text = if (percent != null) "СКАЧИВАЮ QWEN • $percent%"
-                                            else "СКАЧИВАЮ QWEN • ${downloaded / (1024L * 1024L)} МБ"
+                                        status.text = if (percent != null) "СКАЧИВАЮ QWEN 3B • $percent%"
+                                            else "СКАЧИВАЮ QWEN 3B • ${downloaded / (1024L * 1024L)} МБ"
                                     }
                                 }
                             }
@@ -485,14 +486,28 @@ class MainActivity : Activity() {
                 } finally {
                     connection.disconnect()
                 }
-                if (part.length() < 500L * 1024L * 1024L) {
-                    throw IllegalStateException("Загрузка неполная: файл меньше ожидаемого размера. Можно повторить — загрузка продолжится.")
+                if (part.length() < 1_700L * 1024L * 1024L) {
+                    throw IllegalStateException("Загрузка неполная: модель должна занимать около 1,93 ГБ. Повтори загрузку — она продолжится.")
                 }
                 val magic = ByteArray(4)
                 part.inputStream().use { if (it.read(magic) != 4) throw IllegalStateException("Не удалось проверить GGUF-файл") }
                 if (String(magic, Charsets.US_ASCII) != "GGUF") {
                     part.delete()
                     throw IllegalStateException("Сервер вернул не GGUF-модель. Файл удалён.")
+                }
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                part.inputStream().buffered().use { stream ->
+                    val buffer = ByteArray(1024 * 1024)
+                    while (true) {
+                        val count = stream.read(buffer)
+                        if (count < 0) break
+                        digest.update(buffer, 0, count)
+                    }
+                }
+                val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
+                if (!actualSha256.equals(QWEN_MODEL_SHA256, ignoreCase = true)) {
+                    part.delete()
+                    throw IllegalStateException("Контрольная сумма модели не совпала. Повреждённый файл удалён; повтори загрузку.")
                 }
                 if (modelFile.exists()) modelFile.delete()
                 if (!part.renameTo(modelFile)) {
@@ -517,7 +532,7 @@ class MainActivity : Activity() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_TITLE, "Выбери GGUF-модель Qwen")
+            putExtra(Intent.EXTRA_TITLE, "Выбери GGUF-модель")
         }
         startActivityForResult(intent, REQUEST_MODEL)
     }
@@ -570,7 +585,11 @@ class MainActivity : Activity() {
                 val error = NativeLlm.ensureLoaded(file.absolutePath, 6, 4096)
                 runOnUiThread {
                     if (error == null) {
-                        JarvisDiagnostics.event(this, "model_load_success", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}")
+                        JarvisDiagnostics.event(this, "model_load_success", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}; model=${file.name}")
+                        if (file.absolutePath == modelFile.absolutePath && legacyModelFile.exists()) {
+                            legacyModelFile.delete()
+                            File(legacyModelFile.parentFile, "qwen-coder.gguf.part").delete()
+                        }
                         modelReady = true
                         sendButton.isEnabled = true
                         status.text = "ГОТОВ К ДИАЛОГУ"
@@ -991,7 +1010,8 @@ class MainActivity : Activity() {
     }
 
     companion object {
-        private const val QWEN_MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_0.gguf"
+        private const val QWEN_MODEL_URL = "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+        private const val QWEN_MODEL_SHA256 = "9c9f56a391a3abbd5b89d0245bf6106081bcc3173119d4229235dd9d23253f94"
         private const val REQUEST_OVERLAY = 501
         private const val REQUEST_MODEL = 502
         private const val REQUEST_VOICE = 503
