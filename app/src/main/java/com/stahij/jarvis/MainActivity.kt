@@ -466,6 +466,7 @@ class MainActivity : Activity() {
                     part.delete()
                 }
                 runOnUiThread {
+                    NativeLlm.invalidate()
                     status.text = "ПОДКЛЮЧАЮ МОДЕЛЬ..."
                     loadLocalModel(modelFile)
                 }
@@ -511,7 +512,10 @@ class MainActivity : Activity() {
                     temporary.copyTo(modelFile, overwrite = true)
                     temporary.delete()
                 }
-                runOnUiThread { loadLocalModel(modelFile) }
+                runOnUiThread {
+                    NativeLlm.invalidate()
+                    loadLocalModel(modelFile)
+                }
             } catch (e: Exception) {
                 runOnUiThread {
                     status.text = "ОШИБКА ИМПОРТА МОДЕЛИ"
@@ -529,7 +533,7 @@ class MainActivity : Activity() {
         status.text = "ЗАПУСКАЮ МОДЕЛЬ..."
         executor.execute {
             try {
-                val error = NativeLlm.nativeLoadModel(file.absolutePath, 4, 4096)
+                val error = NativeLlm.ensureLoaded(file.absolutePath, 4, 4096)
                 runOnUiThread {
                     if (error == null) {
                         JarvisDiagnostics.event(this, "model_load_success", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}")
