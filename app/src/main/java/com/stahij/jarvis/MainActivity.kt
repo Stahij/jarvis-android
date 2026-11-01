@@ -500,8 +500,12 @@ class MainActivity : Activity() {
                 } finally {
                     connection.disconnect()
                 }
-                if (part.length() < 1_800_000_000L) {
-                    throw IllegalStateException("Загрузка неполная: файл меньше ожидаемых 1,8 ГБ. Можно повторить — загрузка продолжится.")
+                if (part.length() != EXPECTED_MODEL_SIZE_BYTES) {
+                    if (part.length() > EXPECTED_MODEL_SIZE_BYTES) part.delete()
+                    throw IllegalStateException(
+                        "Размер модели не совпал: получено ${part.length()} байт, ожидалось $EXPECTED_MODEL_SIZE_BYTES. " +
+                            "Незавершённую загрузку можно продолжить."
+                    )
                 }
                 runOnUiThread { status.text = "ПРОВЕРЯЮ ЦЕЛОСТНОСТЬ МОДЕЛИ..." }
                 val actualSha256 = sha256File(part)
@@ -1017,6 +1021,7 @@ class MainActivity : Activity() {
     companion object {
         private const val QWEN_MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
         private const val QWEN_MODEL_SHA256 = "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d"
+        private const val EXPECTED_MODEL_SIZE_BYTES = 2_104_932_768L
         private const val NEW_MODEL_FILE_NAME = "qwen2.5-3b-instruct-q4_k_m.gguf"
         private const val REQUEST_OVERLAY = 501
         private const val REQUEST_MODEL = 502
