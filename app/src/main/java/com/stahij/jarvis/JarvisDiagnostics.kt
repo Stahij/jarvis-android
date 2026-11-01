@@ -126,7 +126,7 @@ object JarvisDiagnostics {
     }
 
     fun report(context: Context): String {
-        val out = StringBuilder("JARVIS • ДИАГНОСТИКА 1.5.1\n")
+        val out = StringBuilder("JARVIS • ДИАГНОСТИКА 1.5.2\n")
         out.append("Устройство: ").append(Build.MANUFACTURER).append(" ").append(Build.MODEL).append("\n")
         out.append("Android: ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(")\n\n")
         out.append(liveText(context)).append("\n\nПОСЛЕДНИЕ СОБЫТИЯ\n")
@@ -143,7 +143,7 @@ object JarvisDiagnostics {
 
     fun reportJson(context: Context): String {
         val s = snapshot(context)
-        s.put("app", "Jarvis").put("version", "1.5.1")
+        s.put("app", "Jarvis").put("version", "1.5.2")
         s.put("device", JSONObject().put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL).put("android", Build.VERSION.RELEASE).put("api", Build.VERSION.SDK_INT))
         s.put("events", eventList(context))
         return s.toString(2)
