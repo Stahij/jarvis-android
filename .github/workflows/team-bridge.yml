@@ -1,0 +1,29 @@
+name: DeepSeek Team Bridge Tests
+
+on:
+  push:
+    branches: [ "feature/deepseek-team-bridge" ]
+    paths:
+      - "tools/termux/**"
+      - ".github/workflows/team-bridge.yml"
+  pull_request:
+    paths:
+      - "tools/termux/**"
+      - ".github/workflows/team-bridge.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Python files
+        run: python -m py_compile tools/termux/deepseek_team.py tools/termux/test_deepseek_team.py
+      - name: Run offline tests
+        run: python -m unittest discover -s tools/termux -p "test_*.py" -v
