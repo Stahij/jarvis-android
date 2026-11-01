@@ -504,7 +504,7 @@ class MainActivity : Activity() {
                         digest.update(buffer, 0, count)
                     }
                 }
-                val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
+                val actualSha256 = digest.digest().joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
                 if (!actualSha256.equals(QWEN_MODEL_SHA256, ignoreCase = true)) {
                     part.delete()
                     throw IllegalStateException("Контрольная сумма модели не совпала. Повреждённый файл удалён; повтори загрузку.")
