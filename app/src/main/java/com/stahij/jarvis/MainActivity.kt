@@ -685,9 +685,9 @@ class MainActivity : Activity() {
                 val augmentedContents = contents.copyOf()
                 if (toolContext.isNotBlank() || knowledgeContext.isNotBlank()) {
                     val contextBlock = buildString {
-                        append("\\n\\nДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ДЛЯ ТЕКУЩЕГО ЗАПРОСА:\\n")
-                        if (knowledgeContext.isNotBlank()) append(knowledgeContext.take(1800)).append("\\n")
-                        if (toolContext.isNotBlank()) append(toolContext.take(7000)).append("\\n")
+                        append("\n\nДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ДЛЯ ТЕКУЩЕГО ЗАПРОСА:\n")
+                        if (knowledgeContext.isNotBlank()) append(knowledgeContext.take(1800)).append("\n")
+                        if (toolContext.isNotBlank()) append(toolContext.take(7000)).append("\n")
                         append("Используй только относящиеся к вопросу факты и указывай, если данных недостаточно.")
                     }
                     val lastUserIndex = roles.indexOfLast { it == "user" }
