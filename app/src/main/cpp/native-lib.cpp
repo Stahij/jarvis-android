@@ -4,6 +4,8 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <chrono>
+#include <sstream>
 #include "llama.h"
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "JarvisLLM", __VA_ARGS__)
@@ -13,6 +15,10 @@ static llama_context *g_context = nullptr;
 static llama_sampler *g_sampler = nullptr;
 static std::mutex g_mutex;
 static bool g_backend_initialized = false;
+static long long g_prefill_ms = 0;
+static long long g_decode_ms = 0;
+static int g_prompt_tokens = 0;
+static int g_generated_tokens = 0;
 
 static void release_model() {
     if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
@@ -118,6 +124,7 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
         prompt += "assistant:\n";
     }
 
+    g_prefill_ms = 0; g_decode_ms = 0; g_prompt_tokens = 0; g_generated_tokens = 0;
     llama_memory_clear(llama_get_memory(g_context), true);
     const llama_vocab *vocab = llama_model_get_vocab(g_model);
     const int32_t token_count = -llama_tokenize(
@@ -135,6 +142,8 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
         tokens.erase(tokens.begin(), tokens.end() - MAX_PROMPT_TOKENS);
     }
 
+    g_prompt_tokens = static_cast<int>(tokens.size());
+    const auto prefill_start = std::chrono::steady_clock::now();
     for (size_t offset = 0; offset < tokens.size();) {
         const int32_t batch_size = static_cast<int32_t>(
             std::min<size_t>(256, tokens.size() - offset));
@@ -144,14 +153,17 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
         }
         offset += static_cast<size_t>(batch_size);
     }
+    g_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - prefill_start).count();
 
     llama_sampler_reset(g_sampler);
+    const auto decode_start = std::chrono::steady_clock::now();
     std::string answer;
     answer.reserve(4096);
     const int limit = std::clamp(static_cast<int>(max_tokens), 16, 1024);
     for (int i = 0; i < limit; ++i) {
         const llama_token token = llama_sampler_sample(g_sampler, g_context, -1);
         if (llama_vocab_is_eog(vocab, token)) break;
+        ++g_generated_tokens;
 
         char piece[1024];
         const int32_t piece_len = llama_token_to_piece(vocab, token, piece, sizeof(piece), 0, false);
@@ -160,7 +172,18 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
         llama_batch batch = llama_batch_get_one(const_cast<llama_token *>(&token), 1);
         if (llama_decode(g_context, batch) != 0) break;
     }
+    g_decode_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - decode_start).count();
     return env->NewStringUTF(answer.c_str());
+}
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_stahij_jarvis_NativeLlm_nativeGetLastPerf(JNIEnv *env, jobject) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    std::ostringstream out;
+    out << "prefill_ms=" << g_prefill_ms << "; prompt_tokens=" << g_prompt_tokens
+        << "; decode_ms=" << g_decode_ms << "; generated_tokens=" << g_generated_tokens;
+    return env->NewStringUTF(out.str().c_str());
 }
 
 extern "C"
