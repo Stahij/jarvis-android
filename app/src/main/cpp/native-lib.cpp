@@ -128,9 +128,9 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
             prompt.assign(formatted.data(), static_cast<size_t>(written));
         } else {
             for (size_t i = 0; i < role_storage.size(); ++i) {
-                prompt += role_storage[i] + ":\\n" + content_storage[i] + "\\n";
+                prompt += role_storage[i] + ":\n" + content_storage[i] + "\n";
             }
-            prompt += "assistant:\\n";
+            prompt += "assistant:\n";
         }
         return true;
     };
