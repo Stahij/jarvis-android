@@ -12,4 +12,5 @@ object NativeLlm {
     external fun nativeLoadModel(path: String, threads: Int, contextSize: Int): String?
     external fun nativeGenerate(roles: Array<String>, contents: Array<String>, maxTokens: Int): String
     external fun nativeUnload()
+    external fun nativeGetLastPerf(): String
 }
