@@ -198,7 +198,7 @@ class MainActivity : Activity() {
         input.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                schedulePromptAssistance(s?.toString().orEmpty())
+                // Disabled in 1.5.0: background LLM rewrites competed with foreground work.
             }
             override fun afterTextChanged(s: Editable?) = Unit
         })
@@ -687,10 +687,11 @@ class MainActivity : Activity() {
                 val promptChars = augmentedContents.sumOf { it.length }
                 JarvisDiagnostics.event(this@MainActivity, "generation_start", "messages=${roles.size}; prompt_chars=$promptChars; max_output_tokens=512")
                 val generatedAnswer = NativeLlm.nativeGenerate(roles, augmentedContents, 512).trim()
+                val nativePerf = NativeLlm.nativeGetLastPerf()
                 val generationMs = android.os.SystemClock.elapsedRealtime() - generationStartedAt
                 val generationCpuMs = android.os.Process.getElapsedCpuTime() - generationCpuStartedAt
                 val approxWords = generatedAnswer.trim().split(Regex("\\s+")).count { it.isNotBlank() }
-                JarvisDiagnostics.event(this@MainActivity, "generation_end", "duration_ms=$generationMs; process_cpu_ms=$generationCpuMs; output_chars=${generatedAnswer.length}; approx_words=$approxWords; approx_words_per_sec=${if (generationMs > 0) approxWords * 1000L / generationMs else 0}")
+                JarvisDiagnostics.event(this@MainActivity, "generation_end", "duration_ms=$generationMs; $nativePerf; process_cpu_ms=$generationCpuMs; output_chars=${generatedAnswer.length}; approx_words=$approxWords; approx_words_per_sec=${if (generationMs > 0) approxWords * 1000L / generationMs else 0}")
                 // Small local models may ignore a long repository context and fall back
                 // to generic advice. Never present that as repository analysis: provide
                 // a deterministic, provenance-backed receipt of what the tool actually read.
