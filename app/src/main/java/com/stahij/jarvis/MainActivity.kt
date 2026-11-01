@@ -58,7 +58,7 @@ class MainActivity : Activity() {
     private val maxHistoryMessages = 24
     private val prefs by lazy { getSharedPreferences("jarvis", MODE_PRIVATE) }
     private val history = JSONArray()
-    private val modelFile by lazy { File(File(filesDir, "models"), "qwen-coder.gguf") }
+    private val modelFile by lazy { File(File(filesDir, "models"), "qwen2.5-3b-instruct-q4_k_m.gguf") }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,7 +109,7 @@ class MainActivity : Activity() {
         root.addView(header)
 
         status = TextView(this).apply {
-            text = "ВСТРОЕННЫЙ ДВИЖОК • QWEN"
+            text = "ВСТРОЕННЫЙ ДВИЖОК • QWEN 2.5 3B"
             textSize = 11f
             setTextColor(Color.rgb(104, 160, 181))
             setPadding(0, dp(4), 0, dp(10))
@@ -275,7 +275,7 @@ class MainActivity : Activity() {
                 setOnClickListener { action() }
             }, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(12) })
         }
-        actionButton("Скачать Qwen • около 1,1 ГБ") { confirmQwenDownload() }
+        actionButton("Скачать Qwen2.5 3B • около 2,1 ГБ") { confirmQwenDownload() }
         actionButton("Импортировать GGUF-файл") { chooseModel() }
         actionButton("Назад") { modelScreenDialog?.dismiss() }
         modelScreenDialog = AlertDialog.Builder(this).setView(panel).create()
@@ -411,11 +411,26 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun sha256File(file: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(1024 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { byte ->
+            (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+        }
+    }
+
     private fun confirmQwenDownload() {
         if (modelFile.exists() && modelFile.length() > 500L * 1024L * 1024L) {
             AlertDialog.Builder(this)
                 .setTitle("Модель уже загружена")
-                .setMessage("Заменить текущую модель Qwen? Это потребует повторной загрузки примерно 1,1 ГБ.")
+                .setMessage("Заменить текущую модель на Qwen2.5-3B-Instruct Q4_K_M? Потребуется загрузить около 2,1 ГБ.")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Заменить") { _, _ -> downloadQwenModel() }
                 .show()
@@ -423,7 +438,7 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Загрузить мозг Jarvis")
-            .setMessage("Qwen2.5-Coder-1.5B-Instruct Q4_0. Размер около 1,1 ГБ. Модель будет храниться в памяти приложения и работать локально, без отправки запросов внешним ИИ.")
+            .setMessage("Qwen2.5-3B-Instruct Q4_K_M. Размер около 2,1 ГБ. Модель будет храниться в памяти приложения и работать локально, без отправки запросов внешним ИИ.")
             .setNegativeButton("Позже", null)
             .setPositiveButton("Загрузить") { _, _ -> downloadQwenModel() }
             .show()
@@ -438,7 +453,7 @@ class MainActivity : Activity() {
                 if (!directory.exists() && !directory.mkdirs()) {
                     throw IllegalStateException("Не удалось создать папку модели")
                 }
-                val part = File(directory, "qwen-coder.gguf.part")
+                val part = File(directory, "qwen2.5-3b-instruct-q4_k_m.gguf.part")
                 val url = java.net.URL(QWEN_MODEL_URL)
                 var offset = if (part.exists()) part.length() else 0L
                 val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
@@ -474,8 +489,8 @@ class MainActivity : Activity() {
                                     lastUpdate = now
                                     val percent = total?.let { ((downloaded * 100L) / it).coerceIn(0L, 100L) }
                                     runOnUiThread {
-                                        status.text = if (percent != null) "СКАЧИВАЮ QWEN • $percent%"
-                                            else "СКАЧИВАЮ QWEN • ${downloaded / (1024L * 1024L)} МБ"
+                                        status.text = if (percent != null) "СКАЧИВАЮ QWEN 2.5 3B • $percent%"
+                                            else "СКАЧИВАЮ QWEN 2.5 3B • ${downloaded / (1024L * 1024L)} МБ"
                                     }
                                 }
                             }
@@ -485,8 +500,14 @@ class MainActivity : Activity() {
                 } finally {
                     connection.disconnect()
                 }
-                if (part.length() < 500L * 1024L * 1024L) {
-                    throw IllegalStateException("Загрузка неполная: файл меньше ожидаемого размера. Можно повторить — загрузка продолжится.")
+                if (part.length() < 1_800_000_000L) {
+                    throw IllegalStateException("Загрузка неполная: файл меньше ожидаемых 1,8 ГБ. Можно повторить — загрузка продолжится.")
+                }
+                runOnUiThread { status.text = "ПРОВЕРЯЮ ЦЕЛОСТНОСТЬ МОДЕЛИ..." }
+                val actualSha256 = sha256File(part)
+                if (!actualSha256.equals(QWEN_MODEL_SHA256, ignoreCase = true)) {
+                    part.delete()
+                    throw IllegalStateException("SHA-256 модели не совпал. Повреждённый файл удалён; повтори загрузку.")
                 }
                 val magic = ByteArray(4)
                 part.inputStream().use { if (it.read(magic) != 4) throw IllegalStateException("Не удалось проверить GGUF-файл") }
@@ -517,7 +538,7 @@ class MainActivity : Activity() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_TITLE, "Выбери GGUF-модель Qwen")
+            putExtra(Intent.EXTRA_TITLE, "Выбери GGUF-модель Qwen2.5-3B")
         }
         startActivityForResult(intent, REQUEST_MODEL)
     }
@@ -532,7 +553,7 @@ class MainActivity : Activity() {
                 if (!directory.exists() && !directory.mkdirs()) {
                     throw IllegalStateException("Не удалось создать папку модели")
                 }
-                val temporary = File(directory, "qwen-coder.gguf.part")
+                val temporary = File(directory, "qwen2.5-3b-instruct-q4_k_m.gguf.part")
                 contentResolver.openInputStream(uri)?.use { source ->
                     temporary.outputStream().use { target -> source.copyTo(target) }
                 } ?: throw IllegalStateException("Не удалось открыть выбранный файл")
@@ -573,7 +594,10 @@ class MainActivity : Activity() {
                         JarvisDiagnostics.event(this, "model_load_success", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}")
                         modelReady = true
                         sendButton.isEnabled = true
-                        status.text = "ГОТОВ К ДИАЛОГУ"
+                        if (file.name == NEW_MODEL_FILE_NAME) {
+                            File(File(filesDir, "models"), "qwen-coder.gguf").delete()
+                        }
+                        status.text = "ГОТОВ К ДИАЛОГУ • QWEN 2.5 3B"
                     } else {
                         JarvisDiagnostics.event(this, "model_load_error", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}; error=${error.take(240)}")
                         status.text = "НЕ УДАЛОСЬ ЗАГРУЗИТЬ МОДЕЛЬ"
@@ -991,7 +1015,9 @@ class MainActivity : Activity() {
     }
 
     companion object {
-        private const val QWEN_MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_0.gguf"
+        private const val QWEN_MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
+        private const val QWEN_MODEL_SHA256 = "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d"
+        private const val NEW_MODEL_FILE_NAME = "qwen2.5-3b-instruct-q4_k_m.gguf"
         private const val REQUEST_OVERLAY = 501
         private const val REQUEST_MODEL = 502
         private const val REQUEST_VOICE = 503
