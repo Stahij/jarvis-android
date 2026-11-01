@@ -10,6 +10,8 @@ import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Debug
+import android.os.PowerManager
+import android.os.StatFs
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
@@ -65,15 +67,30 @@ object JarvisDiagnostics {
         val runtime = Runtime.getRuntime()
         val battery = context.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val temp = battery?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+        val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = battery?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val voltage = battery?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
+        val plugged = battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val thermal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) power.currentThermalStatus else -1
+        val pss = am.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid())).firstOrNull()?.totalPss
+        val stat = StatFs(context.filesDir.absolutePath)
         val model = File(File(context.filesDir, "models"), "qwen-coder.gguf")
         val modelState = when { model.length() > 500L * 1024L * 1024L -> "ready"; model.exists() -> "incomplete"; else -> "missing" }
         return JSONObject()
             .put("timestamp", System.currentTimeMillis())
             .put("cpu_percent", cpuPercent() ?: JSONObject.NULL)
+            .put("process_cpu_ms", android.os.Process.getElapsedCpuTime())
+            .put("process_pss_kb", pss ?: JSONObject.NULL)
             .put("ram_available_bytes", mem.availMem).put("ram_total_bytes", mem.totalMem)
+            .put("ram_low", mem.lowMemory).put("ram_threshold_bytes", mem.threshold)
             .put("java_used_bytes", runtime.totalMemory() - runtime.freeMemory()).put("java_max_bytes", runtime.maxMemory())
             .put("native_heap_bytes", Debug.getNativeHeapAllocatedSize())
             .put("battery_temperature_c", if (temp >= 0) temp / 10.0 else JSONObject.NULL)
+            .put("battery_percent", if (level >= 0 && scale > 0) level * 100 / scale else JSONObject.NULL)
+            .put("battery_voltage_mv", if (voltage > 0) voltage else JSONObject.NULL)
+            .put("battery_plugged", plugged != 0).put("thermal_status", thermal)
+            .put("storage_free_bytes", stat.availableBytes).put("storage_total_bytes", stat.totalBytes)
             .put("model_state", modelState).put("model_size_bytes", if (model.exists()) model.length() else 0L)
             .put("gpu_enabled", false).put("engine_cpu_threads", 4)
     }
@@ -87,16 +104,29 @@ object JarvisDiagnostics {
             append("CPU: ").append(if (s.isNull("cpu_percent")) "нет данных" else s.optInt("cpu_percent").toString() + "%").append("\n")
             append("RAM свободно: ").append(mb("ram_available_bytes")).append(" / ").append(mb("ram_total_bytes")).append(" МБ\n")
             append("Java heap: ").append(mb("java_used_bytes")).append(" / ").append(mb("java_max_bytes")).append(" МБ\n")
+            append("PSS процесса: ").append(if (s.isNull("process_pss_kb")) "нет данных" else s.optLong("process_pss_kb") / 1024L).append(" МБ\n")
             append("Native heap: ").append(mb("native_heap_bytes")).append(" МБ\n")
+            append("CPU процесса: ").append(s.optLong("process_cpu_ms")).append(" мс накопленно\n")
             append("Температура батареи: ").append(if (s.isNull("battery_temperature_c")) "нет данных" else s.optDouble("battery_temperature_c").toString() + " °C").append("\n")
+            append("Батарея: ").append(if (s.isNull("battery_percent")) "нет данных" else s.optInt("battery_percent").toString() + "%")
+                .append(if (s.isNull("battery_voltage_mv")) "" else " • " + s.optInt("battery_voltage_mv") + " мВ")
+                .append(if (s.optBoolean("battery_plugged")) " • зарядка" else " • без зарядки").append("\n")
+            append("Тепловой статус Android: ").append(thermalLabel(s.optInt("thermal_status", -1))).append("\n")
+            append("Хранилище свободно: ").append(mb("storage_free_bytes")).append(" / ").append(mb("storage_total_bytes")).append(" МБ\n")
             append("Модель: ").append(s.optString("model_state")).append("\n")
             append("GPU llama.cpp: отключён\nПотоки движка: 4\n")
             append("\nПримечание: температура батареи не является температурой CPU/SoC. CPU — оценка по /proc/stat, если доступна.")
         }
     }
 
+    private fun thermalLabel(value: Int): String = when (value) {
+        0 -> "норма"; 1 -> "лёгкий нагрев"; 2 -> "умеренный нагрев"
+        3 -> "сильный нагрев"; 4 -> "критический нагрев"; 5 -> "аварийное состояние"
+        else -> "нет данных / API ниже 29"
+    }
+
     fun report(context: Context): String {
-        val out = StringBuilder("JARVIS • ДИАГНОСТИКА 1.3.0\n")
+        val out = StringBuilder("JARVIS • ДИАГНОСТИКА 1.4.0\n")
         out.append("Устройство: ").append(Build.MANUFACTURER).append(" ").append(Build.MODEL).append("\n")
         out.append("Android: ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(")\n\n")
         out.append(liveText(context)).append("\n\nПОСЛЕДНИЕ СОБЫТИЯ\n")
@@ -113,7 +143,7 @@ object JarvisDiagnostics {
 
     fun reportJson(context: Context): String {
         val s = snapshot(context)
-        s.put("app", "Jarvis").put("version", "1.3.0")
+        s.put("app", "Jarvis").put("version", "1.4.0")
         s.put("device", JSONObject().put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL).put("android", Build.VERSION.RELEASE).put("api", Build.VERSION.SDK_INT))
         s.put("events", eventList(context))
         return s.toString(2)
