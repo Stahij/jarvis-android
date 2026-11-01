@@ -15,10 +15,14 @@ static llama_context *g_context = nullptr;
 static llama_sampler *g_sampler = nullptr;
 static std::mutex g_mutex;
 static bool g_backend_initialized = false;
+static long long g_format_ms = 0;
+static long long g_tokenize_ms = 0;
 static long long g_prefill_ms = 0;
 static long long g_decode_ms = 0;
 static int g_prompt_tokens = 0;
 static int g_generated_tokens = 0;
+static int g_prefill_batches = 0;
+static int g_trimmed_messages = 0;
 
 static void release_model() {
     if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
@@ -50,8 +54,8 @@ Java_com_stahij_jarvis_NativeLlm_nativeLoadModel(
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = static_cast<uint32_t>(std::max(1024, static_cast<int>(context_size)));
-    ctx_params.n_batch = 256;
-    ctx_params.n_ubatch = 128;
+    ctx_params.n_batch = 512;
+    ctx_params.n_ubatch = 256;
     ctx_params.n_threads = std::max(2, static_cast<int>(threads));
     ctx_params.n_threads_batch = std::max(2, static_cast<int>(threads));
     g_context = llama_init_from_model(g_model, ctx_params);
@@ -103,57 +107,93 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
         env->DeleteLocalRef(jc);
     }
 
-    for (size_t i = 0; i < role_storage.size(); ++i) {
-        chat.push_back({ role_storage[i].c_str(), content_storage[i].c_str() });
-    }
-
+    g_format_ms = 0; g_tokenize_ms = 0; g_prefill_ms = 0; g_decode_ms = 0;
+    g_prompt_tokens = 0; g_generated_tokens = 0; g_prefill_batches = 0; g_trimmed_messages = 0;
     const char *tmpl = llama_model_chat_template(g_model, nullptr);
     std::string prompt;
-    if (tmpl) {
-        const int32_t needed = llama_chat_apply_template(tmpl, chat.data(), chat.size(), true, nullptr, 0);
-        if (needed <= 0) return env->NewStringUTF("Не удалось применить chat template этой модели.");
-        std::vector<char> formatted(static_cast<size_t>(needed) + 1);
-        const int32_t written = llama_chat_apply_template(
-            tmpl, chat.data(), chat.size(), true, formatted.data(), static_cast<int32_t>(formatted.size()));
-        if (written < 0) return env->NewStringUTF("Ошибка форматирования истории диалога.");
-        prompt.assign(formatted.data(), static_cast<size_t>(written));
-    } else {
+    std::vector<llama_token> tokens;
+    auto format_prompt = [&]() -> bool {
+        chat.clear();
         for (size_t i = 0; i < role_storage.size(); ++i) {
-            prompt += role_storage[i] + ":\n" + content_storage[i] + "\n";
+            chat.push_back({ role_storage[i].c_str(), content_storage[i].c_str() });
         }
-        prompt += "assistant:\n";
-    }
-
-    g_prefill_ms = 0; g_decode_ms = 0; g_prompt_tokens = 0; g_generated_tokens = 0;
-    llama_memory_clear(llama_get_memory(g_context), true);
+        prompt.clear();
+        if (tmpl) {
+            const int32_t needed = llama_chat_apply_template(tmpl, chat.data(), chat.size(), true, nullptr, 0);
+            if (needed <= 0) return false;
+            std::vector<char> formatted(static_cast<size_t>(needed) + 1);
+            const int32_t written = llama_chat_apply_template(
+                tmpl, chat.data(), chat.size(), true, formatted.data(), static_cast<int32_t>(formatted.size()));
+            if (written < 0) return false;
+            prompt.assign(formatted.data(), static_cast<size_t>(written));
+        } else {
+            for (size_t i = 0; i < role_storage.size(); ++i) {
+                prompt += role_storage[i] + ":\n" + content_storage[i] + "\n";
+            }
+            prompt += "assistant:\n";
+        }
+        return true;
+    };
     const llama_vocab *vocab = llama_model_get_vocab(g_model);
-    const int32_t token_count = -llama_tokenize(
-        vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()), nullptr, 0, true, true);
-    if (token_count <= 0) return env->NewStringUTF("Не удалось разбить запрос на токены.");
+    auto tokenize_prompt = [&]() -> bool {
+        const int32_t needed = -llama_tokenize(
+            vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()), nullptr, 0, true, true);
+        if (needed <= 0) return false;
+        tokens.resize(static_cast<size_t>(needed));
+        const int32_t written = llama_tokenize(
+            vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
+            tokens.data(), static_cast<int32_t>(tokens.size()), true, true);
+        if (written <= 0) return false;
+        tokens.resize(static_cast<size_t>(written));
+        return true;
+    };
 
-    std::vector<llama_token> tokens(static_cast<size_t>(token_count));
-    const int32_t tokenized = llama_tokenize(
-        vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
-        tokens.data(), static_cast<int32_t>(tokens.size()), true, true);
-    if (tokenized < 0) return env->NewStringUTF("Ошибка токенизации запроса.");
-    // Keep room for generated tokens inside the 4096-token context.
+    auto phase_start = std::chrono::steady_clock::now();
+    if (!format_prompt()) return env->NewStringUTF("Не удалось применить chat template этой модели.");
+    g_format_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - phase_start).count();
+    phase_start = std::chrono::steady_clock::now();
+    if (!tokenize_prompt()) return env->NewStringUTF("Не удалось разбить запрос на токены.");
+    g_tokenize_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - phase_start).count();
+
+    // Keep the system message and newest messages intact. Drop only complete oldest
+    // conversation messages; never cut arbitrary tokens from the system instructions.
     constexpr size_t MAX_PROMPT_TOKENS = 3584;
+    while (tokens.size() > MAX_PROMPT_TOKENS && role_storage.size() > 2) {
+        const size_t remove_count = std::min<size_t>(2, role_storage.size() - 2);
+        role_storage.erase(role_storage.begin() + 1, role_storage.begin() + 1 + remove_count);
+        content_storage.erase(content_storage.begin() + 1, content_storage.begin() + 1 + remove_count);
+        g_trimmed_messages += static_cast<int>(remove_count);
+
+        phase_start = std::chrono::steady_clock::now();
+        if (!format_prompt()) return env->NewStringUTF("Не удалось повторно сформировать сокращённую историю.");
+        g_format_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - phase_start).count();
+        phase_start = std::chrono::steady_clock::now();
+        if (!tokenize_prompt()) return env->NewStringUTF("Не удалось повторно токенизировать сокращённую историю.");
+        g_tokenize_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - phase_start).count();
+    }
     if (tokens.size() > MAX_PROMPT_TOKENS) {
-        tokens.erase(tokens.begin(), tokens.end() - MAX_PROMPT_TOKENS);
+        return env->NewStringUTF("Системная инструкция и последнее сообщение превышают лимит контекста. Сократи вложенный контекст или запрос.");
     }
 
+    llama_memory_clear(llama_get_memory(g_context), true);
     g_prompt_tokens = static_cast<int>(tokens.size());
     const auto prefill_start = std::chrono::steady_clock::now();
     for (size_t offset = 0; offset < tokens.size();) {
         const int32_t batch_size = static_cast<int32_t>(
-            std::min<size_t>(256, tokens.size() - offset));
+            std::min<size_t>(512, tokens.size() - offset));
         llama_batch batch = llama_batch_get_one(tokens.data() + offset, batch_size);
         if (llama_decode(g_context, batch) != 0) {
             return env->NewStringUTF("Не удалось обработать контекст. Попробуй сократить историю.");
         }
+        ++g_prefill_batches;
         offset += static_cast<size_t>(batch_size);
     }
-    g_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - prefill_start).count();
+    g_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - prefill_start).count();
 
     llama_sampler_reset(g_sampler);
     const auto decode_start = std::chrono::steady_clock::now();
@@ -181,7 +221,9 @@ JNIEXPORT jstring JNICALL
 Java_com_stahij_jarvis_NativeLlm_nativeGetLastPerf(JNIEnv *env, jobject) {
     std::lock_guard<std::mutex> lock(g_mutex);
     std::ostringstream out;
-    out << "prefill_ms=" << g_prefill_ms << "; prompt_tokens=" << g_prompt_tokens
+    out << "format_ms=" << g_format_ms << "; tokenize_ms=" << g_tokenize_ms
+        << "; prefill_ms=" << g_prefill_ms << "; prompt_tokens=" << g_prompt_tokens
+        << "; prefill_batches=" << g_prefill_batches << "; trimmed_messages=" << g_trimmed_messages
         << "; decode_ms=" << g_decode_ms << "; generated_tokens=" << g_generated_tokens;
     return env->NewStringUTF(out.str().c_str());
 }

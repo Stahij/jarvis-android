@@ -679,13 +679,24 @@ class MainActivity : Activity() {
                     }
                 } else ""
                 val knowledgeContext = buildSavedKnowledgeContext(prompt)
-                val augmentedSystem = systemInstruction +
-                    if (toolContext.isNotBlank() || knowledgeContext.isNotBlank()) {
-                        "\n\nДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ДЛЯ ТЕКУЩЕГО ЗАПРОСА:\n" +
-                            knowledgeContext + "\n" + toolContext +
-                            "\nИспользуй только относящиеся к вопросу факты и указывай, если данных недостаточно."
-                    } else ""
-                val augmentedContents = contents.copyOf().also { it[0] = augmentedSystem }
+                // Keep the stable system prompt at the beginning. Put retrieved context
+                // beside the current user request so old conversation turns can be dropped
+                // without discarding core instructions or the newest task context.
+                val augmentedContents = contents.copyOf()
+                if (toolContext.isNotBlank() || knowledgeContext.isNotBlank()) {
+                    val contextBlock = buildString {
+                        append("\n\nДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ДЛЯ ТЕКУЩЕГО ЗАПРОСА:\n")
+                        if (knowledgeContext.isNotBlank()) append(knowledgeContext.take(1800)).append("\n")
+                        if (toolContext.isNotBlank()) append(toolContext.take(7000)).append("\n")
+                        append("Используй только относящиеся к вопросу факты и указывай, если данных недостаточно.")
+                    }
+                    val lastUserIndex = roles.indexOfLast { it == "user" }
+                    if (lastUserIndex > 0) {
+                        augmentedContents[lastUserIndex] += contextBlock
+                    } else {
+                        augmentedContents[0] += contextBlock
+                    }
+                }
                 val generationStartedAt = android.os.SystemClock.elapsedRealtime()
                 val generationCpuStartedAt = android.os.Process.getElapsedCpuTime()
                 val promptChars = augmentedContents.sumOf { it.length }
