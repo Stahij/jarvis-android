@@ -23,6 +23,7 @@ static int g_prompt_tokens = 0;
 static int g_generated_tokens = 0;
 static int g_prefill_batches = 0;
 static int g_trimmed_messages = 0;
+static std::string g_finish_reason = "not_started";
 
 static void release_model() {
     if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
@@ -109,6 +110,7 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
 
     g_format_ms = 0; g_tokenize_ms = 0; g_prefill_ms = 0; g_decode_ms = 0;
     g_prompt_tokens = 0; g_generated_tokens = 0; g_prefill_batches = 0; g_trimmed_messages = 0;
+    g_finish_reason = "not_started";
     const char *tmpl = llama_model_chat_template(g_model, nullptr);
     std::string prompt;
     std::vector<llama_token> tokens;
@@ -159,7 +161,8 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
 
     // Keep the system message and newest messages intact. Drop only complete oldest
     // conversation messages; never cut arbitrary tokens from the system instructions.
-    constexpr size_t MAX_PROMPT_TOKENS = 3584;
+    // Reserve half of the 4096-token context for a full 1024-token answer.
+    constexpr size_t MAX_PROMPT_TOKENS = 3072;
     while (tokens.size() > MAX_PROMPT_TOKENS && role_storage.size() > 2) {
         const size_t remove_count = std::min<size_t>(2, role_storage.size() - 2);
         role_storage.erase(role_storage.begin() + 1, role_storage.begin() + 1 + remove_count);
@@ -198,11 +201,15 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
     llama_sampler_reset(g_sampler);
     const auto decode_start = std::chrono::steady_clock::now();
     std::string answer;
-    answer.reserve(4096);
+    answer.reserve(8192);
     const int limit = std::clamp(static_cast<int>(max_tokens), 16, 1024);
+    g_finish_reason = "token_limit";
     for (int i = 0; i < limit; ++i) {
         const llama_token token = llama_sampler_sample(g_sampler, g_context, -1);
-        if (llama_vocab_is_eog(vocab, token)) break;
+        if (llama_vocab_is_eog(vocab, token)) {
+            g_finish_reason = "eog";
+            break;
+        }
         ++g_generated_tokens;
 
         char piece[1024];
@@ -210,7 +217,10 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
         if (piece_len > 0) answer.append(piece, static_cast<size_t>(piece_len));
 
         llama_batch batch = llama_batch_get_one(const_cast<llama_token *>(&token), 1);
-        if (llama_decode(g_context, batch) != 0) break;
+        if (llama_decode(g_context, batch) != 0) {
+            g_finish_reason = "decode_error";
+            break;
+        }
     }
     g_decode_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - decode_start).count();
     return env->NewStringUTF(answer.c_str());
@@ -224,7 +234,8 @@ Java_com_stahij_jarvis_NativeLlm_nativeGetLastPerf(JNIEnv *env, jobject) {
     out << "format_ms=" << g_format_ms << "; tokenize_ms=" << g_tokenize_ms
         << "; prefill_ms=" << g_prefill_ms << "; prompt_tokens=" << g_prompt_tokens
         << "; prefill_batches=" << g_prefill_batches << "; trimmed_messages=" << g_trimmed_messages
-        << "; decode_ms=" << g_decode_ms << "; generated_tokens=" << g_generated_tokens;
+        << "; decode_ms=" << g_decode_ms << "; generated_tokens=" << g_generated_tokens
+        << "; finish_reason=" << g_finish_reason;
     return env->NewStringUTF(out.str().c_str());
 }
 

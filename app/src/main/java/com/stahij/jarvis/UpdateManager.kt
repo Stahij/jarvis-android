@@ -57,7 +57,10 @@ class UpdateManager(private val context: Context) {
         }
     }
 
-    fun downloadAndVerify(update: JarvisUpdate): File {
+    fun downloadAndVerify(
+        update: JarvisUpdate,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }
+    ): File {
         val directory = File(context.cacheDir, "updates")
         if (!directory.exists() && !directory.mkdirs()) {
             throw IllegalStateException("Не удалось создать папку загрузки")
@@ -73,9 +76,23 @@ class UpdateManager(private val context: Context) {
             if (connection.responseCode !in 200..299) {
                 throw IllegalStateException("Не удалось скачать APK: HTTP ${connection.responseCode}")
             }
+            val totalBytes = connection.contentLengthLong
+            var downloadedBytes = 0L
             connection.inputStream.use { input ->
-                temporary.outputStream().use { output -> input.copyTo(output) }
+                temporary.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        downloadedBytes += count
+                        onProgress(downloadedBytes, totalBytes)
+                    }
+                }
             }
+        } catch (e: Exception) {
+            temporary.delete()
+            throw e
         } finally {
             connection.disconnect()
         }

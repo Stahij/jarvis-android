@@ -2,6 +2,7 @@ package com.stahij.jarvis
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.ProgressDialog
 import android.content.Intent
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
@@ -28,6 +29,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : Activity() {
     private val bg = Color.rgb(5, 10, 22)
@@ -35,6 +37,7 @@ class MainActivity : Activity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val promptScheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private val promptRevision = AtomicInteger(0)
+    private val updateCheckRunning = AtomicBoolean(false)
     private var promptTask: java.util.concurrent.ScheduledFuture<*>? = null
     private lateinit var promptSuggestionPanel: LinearLayout
     private lateinit var promptSuggestionText: TextView
@@ -71,6 +74,9 @@ class MainActivity : Activity() {
             status.text = "ОЖИДАЕТ ПОДКЛЮЧЕНИЯ МОДЕЛИ"
         }
         maybeCheckForUpdates()
+        promptScheduler.scheduleAtFixedRate(
+            { maybeCheckForUpdates() }, 24, 24, TimeUnit.HOURS
+        )
     }
 
     private fun buildUi() {
@@ -318,6 +324,7 @@ class MainActivity : Activity() {
     }
 
     private fun checkForUpdates(manual: Boolean) {
+        if (!updateCheckRunning.compareAndSet(false, true)) return
         if (manual) status.text = "ПРОВЕРЯЮ ОБНОВЛЕНИЯ..."
         executor.execute {
             try {
@@ -333,12 +340,16 @@ class MainActivity : Activity() {
                                 .show()
                         }
                     } else {
-                        AlertDialog.Builder(this)
-                            .setTitle("Доступно обновление Jarvis")
-                            .setMessage("Новая версия: ${update.version}. Скачать и установить?")
-                            .setNegativeButton("Позже", null)
-                            .setPositiveButton("Скачать") { _, _ -> downloadAndInstall(update) }
-                            .show()
+                        val prompted = prefs.getString("last_update_prompted_version", "")
+                        if (manual || prompted != update.version) {
+                            prefs.edit().putString("last_update_prompted_version", update.version).apply()
+                            AlertDialog.Builder(this)
+                                .setTitle("Доступно обновление Jarvis")
+                                .setMessage("Новая версия: ${update.version}. Скачать и установить?")
+                                .setNegativeButton("Позже", null)
+                                .setPositiveButton("Скачать") { _, _ -> downloadAndInstall(update) }
+                                .show()
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -351,21 +362,44 @@ class MainActivity : Activity() {
                             .show()
                     }
                 }
+            } finally {
+                updateCheckRunning.set(false)
             }
         }
     }
 
     private fun downloadAndInstall(update: JarvisUpdate) {
+        val progress = ProgressDialog(this).apply {
+            setTitle("Обновление Jarvis ${update.version}")
+            setMessage("Загрузка APK…")
+            setProgressStyle(ProgressDialog.STYLE_HORIZONTAL)
+            max = 100
+            setCancelable(false)
+            show()
+        }
         status.text = "СКАЧИВАЮ ОБНОВЛЕНИЕ ${update.version}..."
         executor.execute {
             try {
-                val apk = UpdateManager(this).downloadAndVerify(update)
+                val apk = UpdateManager(this).downloadAndVerify(update) { downloaded, total ->
+                    runOnUiThread {
+                        if (total > 0L) {
+                            progress.isIndeterminate = false
+                            progress.progress = ((downloaded * 100L) / total).toInt().coerceIn(0, 100)
+                            progress.setMessage("Загрузка и проверка APK: ${downloaded / 1024} / ${total / 1024} КБ")
+                        } else {
+                            progress.isIndeterminate = true
+                            progress.setMessage("Загрузка APK… ${downloaded / 1024} КБ")
+                        }
+                    }
+                }
+                runOnUiThread { progress.dismiss() }
+                UpdateManager(this).install(apk)
                 runOnUiThread {
-                    status.text = "ПОДПИСЬ И SHA-256 ПРОВЕРЕНЫ • ОТКРЫВАЮ УСТАНОВЩИК"
-                    UpdateManager(this).install(apk)
+                    status.text = "APK ПРОВЕРЕН • ОЖИДАЕТ ПОДТВЕРЖДЕНИЯ ANDROID"
                 }
             } catch (e: Exception) {
                 runOnUiThread {
+                    progress.dismiss()
                     status.text = "ОШИБКА ОБНОВЛЕНИЯ"
                     AlertDialog.Builder(this)
                         .setTitle("Обновление не установлено")
@@ -526,14 +560,14 @@ class MainActivity : Activity() {
     }
 
     private fun loadLocalModel(file: File) {
-        JarvisDiagnostics.event(this, "model_load_start", "file=${file.name}; size=${file.length() / 1048576L}MB")
+        JarvisDiagnostics.event(this, "model_load_start", "file=${file.name}; size=${file.length() / 1048576L}MB; threads=6; context=4096")
         val loadStartedAt = android.os.SystemClock.elapsedRealtime()
         modelReady = false
         sendButton.isEnabled = false
         status.text = "ЗАПУСКАЮ МОДЕЛЬ..."
         executor.execute {
             try {
-                val error = NativeLlm.ensureLoaded(file.absolutePath, 4, 4096)
+                val error = NativeLlm.ensureLoaded(file.absolutePath, 6, 4096)
                 runOnUiThread {
                     if (error == null) {
                         JarvisDiagnostics.event(this, "model_load_success", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}")
@@ -700,8 +734,8 @@ class MainActivity : Activity() {
                 val generationStartedAt = android.os.SystemClock.elapsedRealtime()
                 val generationCpuStartedAt = android.os.Process.getElapsedCpuTime()
                 val promptChars = augmentedContents.sumOf { it.length }
-                JarvisDiagnostics.event(this@MainActivity, "generation_start", "messages=${roles.size}; prompt_chars=$promptChars; max_output_tokens=512")
-                val generatedAnswer = NativeLlm.nativeGenerate(roles, augmentedContents, 512).trim()
+                JarvisDiagnostics.event(this@MainActivity, "generation_start", "messages=${roles.size}; prompt_chars=$promptChars; max_output_tokens=1024")
+                val generatedAnswer = NativeLlm.nativeGenerate(roles, augmentedContents, 1024).trim()
                 val nativePerf = NativeLlm.nativeGetLastPerf()
                 val generationMs = android.os.SystemClock.elapsedRealtime() - generationStartedAt
                 val generationCpuMs = android.os.Process.getElapsedCpuTime() - generationCpuStartedAt
@@ -710,7 +744,7 @@ class MainActivity : Activity() {
                 // Small local models may ignore a long repository context and fall back
                 // to generic advice. Never present that as repository analysis: provide
                 // a deterministic, provenance-backed receipt of what the tool actually read.
-                val answer = if (toolContext.contains("GitHub: ДАННЫЕ ПОЛУЧЕНЫ УСПЕШНО") &&
+                val baseAnswer = if (toolContext.contains("GitHub: ДАННЫЕ ПОЛУЧЕНЫ УСПЕШНО") &&
                     (generatedAnswer.isBlank() ||
                      generatedAnswer.contains("откройте github", ignoreCase = true) ||
                      generatedAnswer.contains("откройте репозиторий", ignoreCase = true) ||
@@ -718,6 +752,9 @@ class MainActivity : Activity() {
                      generatedAnswer.contains("я не могу получить доступ", ignoreCase = true))) {
                     GitHubChatTool.buildReadReceipt(toolContext, generatedAnswer)
                 } else generatedAnswer
+                val answer = baseAnswer + if (nativePerf.contains("finish_reason=token_limit")) {
+                    "\n\n[Ответ достиг лимита 1024 токена. Попроси продолжить.]"
+                } else ""
                 runOnUiThread {
                     history.put(JSONObject().put("role", "assistant").put("content", answer))
                     trimHistory()
