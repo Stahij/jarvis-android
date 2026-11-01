@@ -500,10 +500,11 @@ class MainActivity : Activity() {
                 } finally {
                     connection.disconnect()
                 }
-                if (part.length() != EXPECTED_MODEL_SIZE_BYTES) {
-                    if (part.length() > EXPECTED_MODEL_SIZE_BYTES) part.delete()
+                val actualModelSize = part.length()
+                if (actualModelSize != EXPECTED_MODEL_SIZE_BYTES) {
+                    if (actualModelSize > EXPECTED_MODEL_SIZE_BYTES) part.delete()
                     throw IllegalStateException(
-                        "Размер модели не совпал: получено ${part.length()} байт, ожидалось $EXPECTED_MODEL_SIZE_BYTES. " +
+                        "Размер модели не совпал: получено $actualModelSize байт, ожидалось $EXPECTED_MODEL_SIZE_BYTES. " +
                             "Незавершённую загрузку можно продолжить."
                     )
                 }
@@ -601,7 +602,11 @@ class MainActivity : Activity() {
                         if (file.name == NEW_MODEL_FILE_NAME) {
                             File(File(filesDir, "models"), "qwen-coder.gguf").delete()
                         }
-                        status.text = "ГОТОВ К ДИАЛОГУ • QWEN 2.5 3B"
+                        status.text = if (file.name == NEW_MODEL_FILE_NAME) {
+                            "ГОТОВ К ДИАЛОГУ • QWEN 2.5 3B"
+                        } else {
+                            "ГОТОВ К ДИАЛОГУ"
+                        }
                     } else {
                         JarvisDiagnostics.event(this, "model_load_error", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}; error=${error.take(240)}")
                         status.text = "НЕ УДАЛОСЬ ЗАГРУЗИТЬ МОДЕЛЬ"
