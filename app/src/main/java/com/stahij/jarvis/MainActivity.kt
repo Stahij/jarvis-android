@@ -698,7 +698,7 @@ class MainActivity : Activity() {
             Если актуальные сведения без сети недоступны, честно скажи об этом.
             Отвечай по-русски, ясно, доброжелательно и по существу.
         """.trimIndent() + "\n\nТЕКУЩАЯ РОЛЬ: $activePersona\n$personaInstruction"
-        // Keep the full chat on disk, but send only the latest four turns to the mobile model.
+        // Keep the full chat on disk, but send only the latest four messages to the mobile model.
         // The native engine can reuse the stable system-prompt prefix between generations.
         val promptStart = (history.length() - 4).coerceAtLeast(0)
         val promptHistory = (promptStart until history.length()).map { history.getJSONObject(it) }
