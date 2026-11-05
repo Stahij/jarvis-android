@@ -698,9 +698,9 @@ class MainActivity : Activity() {
             Если актуальные сведения без сети недоступны, честно скажи об этом.
             Отвечай по-русски, ясно, доброжелательно и по существу.
         """.trimIndent() + "\n\nТЕКУЩАЯ РОЛЬ: $activePersona\n$personaInstruction"
-        // В модель отправляем только последние 8 реплик: сохранённая история остаётся полной,
-        // но каждый новый запрос не заставляет движок повторно обрабатывать весь диалог.
-        val promptStart = (history.length() - 8).coerceAtLeast(0)
+        // Keep the full chat on disk, but send only the latest four turns to the mobile model.
+        // The native engine can reuse the stable system-prompt prefix between generations.
+        val promptStart = (history.length() - 4).coerceAtLeast(0)
         val promptHistory = (promptStart until history.length()).map { history.getJSONObject(it) }
         val roles = Array(promptHistory.size + 1) { i ->
             if (i == 0) "system" else promptHistory[i - 1].optString("role", "user")
