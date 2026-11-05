@@ -4,6 +4,8 @@ on:
   push:
     branches: [ "main", "preview/**", "release/**", "release-signing-bootstrap", "feature/**" ]
     tags: [ "v*" ]
+  pull_request:
+    branches: [ "feature/qwen-2.5-3b-instruct" ]
   workflow_dispatch:
     inputs:
       build_release:
@@ -57,7 +59,7 @@ jobs:
           retention-days: 14
 
   release:
-    if: (github.event_name == 'workflow_dispatch' && (inputs.build_release || inputs.publish_release)) || startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/feature/local-brain-and-updater' || github.ref == 'refs/heads/feature/jarvis-1.5.3-output-speed-updater' || github.ref == 'refs/heads/feature/qwen-2.5-3b-instruct' || github.ref == 'refs/heads/feature/jarvis-1.5.5-prefill-updater' || startsWith(github.ref, 'refs/heads/release/')
+    if: (github.event_name == 'workflow_dispatch' && (inputs.build_release || inputs.publish_release)) || startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/feature/local-brain-and-updater' || github.ref == 'refs/heads/feature/jarvis-1.5.3-output-speed-updater' || github.ref == 'refs/heads/feature/qwen-2.5-3b-instruct' || github.ref == 'refs/heads/feature/jarvis-1.5.5-prefill-updater' || startsWith(github.ref, 'refs/heads/release/') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/jarvis-1.5.5-prefill-updater')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
