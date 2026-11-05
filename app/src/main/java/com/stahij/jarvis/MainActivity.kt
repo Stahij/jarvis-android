@@ -346,7 +346,11 @@ class MainActivity : Activity() {
                             prefs.edit().putString("last_update_prompted_version", update.version).apply()
                             AlertDialog.Builder(this)
                                 .setTitle("Доступно обновление Jarvis")
-                                .setMessage("Новая версия: ${update.version}. Скачать и установить?")
+                                .setMessage(buildString {
+                                    append("Новая версия: \${update.version}.")
+                                    if (update.releaseNotes.isNotBlank()) append("\n\n").append(update.releaseNotes)
+                                    append("\n\nСкачать и установить?")
+                                })
                                 .setNegativeButton("Позже", null)
                                 .setPositiveButton("Скачать") { _, _ -> downloadAndInstall(update) }
                                 .show()
