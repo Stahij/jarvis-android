@@ -285,6 +285,7 @@ Java_com_stahij_jarvis_NativeLlm_nativeGetLastPerf(JNIEnv *env, jobject) {
         << "; prefill_ms=" << g_prefill_ms << "; prompt_tokens=" << g_prompt_tokens
         << "; prefill_batches=" << g_prefill_batches << "; trimmed_messages=" << g_trimmed_messages
         << "; cache_reused_tokens=" << g_cache_reused_tokens
+        << "; prefill_new_tokens=" << (g_prompt_tokens - g_cache_reused_tokens)
         << "; decode_ms=" << g_decode_ms << "; generated_tokens=" << g_generated_tokens
         << "; finish_reason=" << g_finish_reason;
     return env->NewStringUTF(out.str().c_str());
