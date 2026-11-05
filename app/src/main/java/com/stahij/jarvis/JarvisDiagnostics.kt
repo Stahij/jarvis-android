@@ -114,7 +114,7 @@ object JarvisDiagnostics {
             append("Тепловой статус Android: ").append(thermalLabel(s.optInt("thermal_status", -1))).append("\n")
             append("Хранилище свободно: ").append(mb("storage_free_bytes")).append(" / ").append(mb("storage_total_bytes")).append(" МБ\n")
             append("Модель: ").append(s.optString("model_state")).append("\n")
-            append("GPU llama.cpp: отключён\nПотоки движка: 6\n")
+            append("GPU llama.cpp: отключён\nПотоки движка: 4 • batch: 4\n")
             append("\nПримечание: температура батареи не является температурой CPU/SoC. CPU — оценка по /proc/stat, если доступна.")
         }
     }
