@@ -143,7 +143,7 @@ jobs:
         id: release_tag
         if: startsWith(github.ref, 'refs/heads/release/')
         run: |
-          APP_VERSION="$(sed -n 's/^[[:space:]]*versionName = "\\([^"]*\\)".*/\\1/p' app/build.gradle.kts | head -n1)"
+          APP_VERSION="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n1)"
           BRANCH_VERSION="${GITHUB_REF_NAME#release/}"
           EXPECTED_TAG="v${APP_VERSION}"
           if [ -z "$APP_VERSION" ] || { [ "$BRANCH_VERSION" != "$EXPECTED_TAG" ] && [ "$BRANCH_VERSION" != "$APP_VERSION" ]; }; then
