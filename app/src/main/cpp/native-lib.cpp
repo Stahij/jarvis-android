@@ -23,9 +23,15 @@ static int g_prompt_tokens = 0;
 static int g_generated_tokens = 0;
 static int g_prefill_batches = 0;
 static int g_trimmed_messages = 0;
+static int g_cache_reused_tokens = 0;
+static std::vector<llama_token> g_cached_tokens;
+static bool g_cache_valid = false;
 static std::string g_finish_reason = "not_started";
 
 static void release_model() {
+    g_cached_tokens.clear();
+    g_cache_valid = false;
+    g_cache_reused_tokens = 0;
     if (g_sampler) { llama_sampler_free(g_sampler); g_sampler = nullptr; }
     if (g_context) { llama_free(g_context); g_context = nullptr; }
     if (g_model) { llama_model_free(g_model); g_model = nullptr; }
@@ -57,8 +63,11 @@ Java_com_stahij_jarvis_NativeLlm_nativeLoadModel(
     ctx_params.n_ctx = static_cast<uint32_t>(std::max(1024, static_cast<int>(context_size)));
     ctx_params.n_batch = 512;
     ctx_params.n_ubatch = 256;
-    ctx_params.n_threads = std::max(2, static_cast<int>(threads));
-    ctx_params.n_threads_batch = std::max(2, static_cast<int>(threads));
+    // Snapdragon 732G has a heterogeneous 2+6 CPU layout. Cap both pools at
+    // four initially; benchmark before increasing them on mobile devices.
+    const int cpu_threads = std::clamp(static_cast<int>(threads), 2, 4);
+    ctx_params.n_threads = cpu_threads;
+    ctx_params.n_threads_batch = cpu_threads;
     g_context = llama_init_from_model(g_model, ctx_params);
     if (!g_context) {
         release_model();
@@ -109,7 +118,7 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
     }
 
     g_format_ms = 0; g_tokenize_ms = 0; g_prefill_ms = 0; g_decode_ms = 0;
-    g_prompt_tokens = 0; g_generated_tokens = 0; g_prefill_batches = 0; g_trimmed_messages = 0;
+    g_prompt_tokens = 0; g_generated_tokens = 0; g_prefill_batches = 0; g_trimmed_messages = 0; g_cache_reused_tokens = 0;
     g_finish_reason = "not_started";
     const char *tmpl = llama_model_chat_template(g_model, nullptr);
     std::string prompt;
@@ -182,19 +191,56 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
         return env->NewStringUTF("Системная инструкция и последнее сообщение превышают лимит контекста. Сократи вложенный контекст или запрос.");
     }
 
-    llama_memory_clear(llama_get_memory(g_context), true);
+    // Reuse the unchanged prefix of the previous prompt and generated answer.
+    // The token prefix is compared exactly; any changed system prompt/history/model
+    // automatically falls back to a clean context.
+    llama_memory_t memory = llama_get_memory(g_context);
+    size_t reused_tokens = 0;
+    const bool memory_matches_cache =
+        g_cache_valid &&
+        !g_cached_tokens.empty() &&
+        llama_memory_seq_pos_max(memory, 0) == static_cast<llama_pos>(g_cached_tokens.size() - 1);
+
+    if (memory_matches_cache) {
+        const size_t limit = std::min(tokens.size(), g_cached_tokens.size());
+        while (reused_tokens < limit && tokens[reused_tokens] == g_cached_tokens[reused_tokens]) {
+            ++reused_tokens;
+        }
+        // Keep at least one prompt token to recompute logits for the next generation.
+        if (reused_tokens == tokens.size() && reused_tokens > 0) --reused_tokens;
+        if (reused_tokens < g_cached_tokens.size() &&
+            !llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(reused_tokens), -1)) {
+            reused_tokens = 0;
+            g_cache_valid = false;
+        }
+    }
+
+    if (!memory_matches_cache || !g_cache_valid) {
+        llama_memory_clear(memory, true);
+        g_cached_tokens.clear();
+        reused_tokens = 0;
+    } else {
+        g_cached_tokens.resize(reused_tokens);
+    }
+
+    g_cache_reused_tokens = static_cast<int>(reused_tokens);
     g_prompt_tokens = static_cast<int>(tokens.size());
     const auto prefill_start = std::chrono::steady_clock::now();
-    for (size_t offset = 0; offset < tokens.size();) {
+    for (size_t offset = reused_tokens; offset < tokens.size();) {
         const int32_t batch_size = static_cast<int32_t>(
             std::min<size_t>(512, tokens.size() - offset));
         llama_batch batch = llama_batch_get_one(tokens.data() + offset, batch_size);
         if (llama_decode(g_context, batch) != 0) {
+            g_cache_valid = false;
+            llama_memory_clear(memory, true);
+            g_cached_tokens.clear();
             return env->NewStringUTF("Не удалось обработать контекст. Попробуй сократить историю.");
         }
+        g_cached_tokens.insert(g_cached_tokens.end(), tokens.begin() + offset, tokens.begin() + offset + batch_size);
         ++g_prefill_batches;
         offset += static_cast<size_t>(batch_size);
     }
+    g_cache_valid = true;
     g_prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - prefill_start).count();
 
@@ -219,8 +265,12 @@ Java_com_stahij_jarvis_NativeLlm_nativeGenerate(
         llama_batch batch = llama_batch_get_one(const_cast<llama_token *>(&token), 1);
         if (llama_decode(g_context, batch) != 0) {
             g_finish_reason = "decode_error";
+            g_cache_valid = false;
+            llama_memory_clear(memory, true);
+            g_cached_tokens.clear();
             break;
         }
+        g_cached_tokens.push_back(token);
     }
     g_decode_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - decode_start).count();
     return env->NewStringUTF(answer.c_str());
@@ -234,6 +284,7 @@ Java_com_stahij_jarvis_NativeLlm_nativeGetLastPerf(JNIEnv *env, jobject) {
     out << "format_ms=" << g_format_ms << "; tokenize_ms=" << g_tokenize_ms
         << "; prefill_ms=" << g_prefill_ms << "; prompt_tokens=" << g_prompt_tokens
         << "; prefill_batches=" << g_prefill_batches << "; trimmed_messages=" << g_trimmed_messages
+        << "; cache_reused_tokens=" << g_cache_reused_tokens
         << "; decode_ms=" << g_decode_ms << "; generated_tokens=" << g_generated_tokens
         << "; finish_reason=" << g_finish_reason;
     return env->NewStringUTF(out.str().c_str());
