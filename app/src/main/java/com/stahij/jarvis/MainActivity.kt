@@ -347,7 +347,7 @@ class MainActivity : Activity() {
                             AlertDialog.Builder(this)
                                 .setTitle("Доступно обновление Jarvis")
                                 .setMessage(buildString {
-                                    append("Новая версия: \${update.version}.")
+                                    append("Новая версия: ${update.version}.")
                                     if (update.releaseNotes.isNotBlank()) append("\n\n").append(update.releaseNotes)
                                     append("\n\nСкачать и установить?")
                                 })
