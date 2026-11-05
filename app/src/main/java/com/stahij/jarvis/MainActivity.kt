@@ -575,14 +575,14 @@ class MainActivity : Activity() {
     }
 
     private fun loadLocalModel(file: File) {
-        JarvisDiagnostics.event(this, "model_load_start", "file=${file.name}; size=${file.length() / 1048576L}MB; threads=6; context=4096")
+        JarvisDiagnostics.event(this, "model_load_start", "file=${file.name}; size=${file.length() / 1048576L}MB; threads=4; batch_threads=4; context=4096")
         val loadStartedAt = android.os.SystemClock.elapsedRealtime()
         modelReady = false
         sendButton.isEnabled = false
         status.text = "ЗАПУСКАЮ МОДЕЛЬ..."
         executor.execute {
             try {
-                val error = NativeLlm.ensureLoaded(file.absolutePath, 6, 4096)
+                val error = NativeLlm.ensureLoaded(file.absolutePath, 4, 4096)
                 runOnUiThread {
                     if (error == null) {
                         JarvisDiagnostics.event(this, "model_load_success", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}; model=${file.name}")
