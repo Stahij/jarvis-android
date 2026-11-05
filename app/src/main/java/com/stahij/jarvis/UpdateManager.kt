@@ -17,7 +17,8 @@ import org.json.JSONObject
 data class JarvisUpdate(
     val version: String,
     val downloadUrl: String,
-    val sha256: String
+    val sha256: String,
+    val releaseNotes: String
 )
 
 class UpdateManager(private val context: Context) {
@@ -31,7 +32,9 @@ class UpdateManager(private val context: Context) {
             setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
         }
         try {
-            if (connection.responseCode == 404) return null
+            if (connection.responseCode == 404) {
+                throw IllegalStateException("На GitHub пока нет опубликованного релиза Jarvis. Проверь позже — автоматическая публикация появится вместе с новой версией.")
+            }
             if (connection.responseCode !in 200..299) {
                 throw IllegalStateException("GitHub вернул HTTP ${connection.responseCode}")
             }
@@ -40,18 +43,19 @@ class UpdateManager(private val context: Context) {
             val currentVersion = currentVersion()
             if (latestVersion.isBlank() || compareVersions(latestVersion, currentVersion) <= 0) return null
 
-            val assets = release.optJSONArray("assets") ?: return null
+            val assets = release.optJSONArray("assets")
+                ?: throw IllegalStateException("GitHub вернул релиз без списка файлов")
             for (i in 0 until assets.length()) {
                 val asset = assets.getJSONObject(i)
                 if (asset.optString("name") == APK_ASSET_NAME) {
                     val digest = asset.optString("digest").removePrefix("sha256:").lowercase()
                     val url = asset.optString("browser_download_url")
                     if (digest.matches(Regex("[a-f0-9]{64}")) && url.startsWith("https://")) {
-                        return JarvisUpdate(latestVersion, url, digest)
+                        return JarvisUpdate(latestVersion, url, digest, release.optString("body").take(1600))
                     }
                 }
             }
-            throw IllegalStateException("В релизе нет APK с опубликованной SHA-256 контрольной суммой")
+            throw IllegalStateException("Релиз $latestVersion найден, но в нём нет Jarvis-release.apk с SHA-256. Установка отменена.")
         } finally {
             connection.disconnect()
         }
