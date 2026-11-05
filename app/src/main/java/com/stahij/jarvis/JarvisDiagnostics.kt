@@ -92,7 +92,7 @@ object JarvisDiagnostics {
             .put("battery_plugged", plugged != 0).put("thermal_status", thermal)
             .put("storage_free_bytes", stat.availableBytes).put("storage_total_bytes", stat.totalBytes)
             .put("model_state", modelState).put("model_size_bytes", if (model.exists()) model.length() else 0L)
-            .put("gpu_enabled", false).put("engine_cpu_threads", 6)
+            .put("gpu_enabled", false).put("engine_cpu_threads", 4).put("engine_batch_threads", 4)
     }
 
     private fun liveText(context: Context): String {
@@ -126,7 +126,7 @@ object JarvisDiagnostics {
     }
 
     fun report(context: Context): String {
-        val out = StringBuilder("JARVIS • ДИАГНОСТИКА 1.5.4\n")
+        val out = StringBuilder("JARVIS • ДИАГНОСТИКА 1.5.5\n")
         out.append("Устройство: ").append(Build.MANUFACTURER).append(" ").append(Build.MODEL).append("\n")
         out.append("Android: ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(")\n\n")
         out.append(liveText(context)).append("\n\nПОСЛЕДНИЕ СОБЫТИЯ\n")
@@ -143,7 +143,7 @@ object JarvisDiagnostics {
 
     fun reportJson(context: Context): String {
         val s = snapshot(context)
-        s.put("app", "Jarvis").put("version", "1.5.4")
+        s.put("app", "Jarvis").put("version", "1.5.5")
         s.put("device", JSONObject().put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL).put("android", Build.VERSION.RELEASE).put("api", Build.VERSION.SDK_INT))
         s.put("events", eventList(context))
         return s.toString(2)
