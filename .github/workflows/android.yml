@@ -2,7 +2,7 @@ name: Build Jarvis Android APK
 
 on:
   push:
-    branches: [ "main", "preview/**", "release/**", "release-signing-bootstrap", "feature/**", "review/**" ]
+    branches: [ "main", "preview/**", "release/**", "release-signing-bootstrap", "feature/**", "review/**", "field-test/**" ]
     tags: [ "v*" ]
   pull_request:
     branches: [ "feature/qwen-2.5-3b-instruct" ]
