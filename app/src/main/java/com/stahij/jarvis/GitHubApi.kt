@@ -39,6 +39,13 @@ class GitHubApi(private val token: String) {
     }
 
     fun writeFile(repo: String, branch: String, path: String, content: String, sha: String?, message: String): String {
+        require(
+            branch.startsWith("feature/") ||
+            branch.startsWith("review/") ||
+            branch.startsWith("preview/")
+        ) {
+            "Запись разрешена только в feature/*, review/* и preview/*. Защищённые ветки недоступны."
+        }
         val encodedPath = path.split("/").joinToString("/") { URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
         val body = JSONObject()
             .put("message", message)
