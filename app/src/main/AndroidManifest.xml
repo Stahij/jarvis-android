@@ -9,7 +9,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="Jarvis"
+        android:label="Jarvis Lite"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="true"
         android:supportsRtl="true">
