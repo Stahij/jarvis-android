@@ -9,11 +9,11 @@ android {
     ndkVersion = "29.0.13113456"
 
     defaultConfig {
-        applicationId = "com.stahij.jarvis.preview"
+        applicationId = "com.stahij.jarvis.lite"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "1.5.5"
+        versionCode = 23
+        versionName = "1.5.5-lite"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
