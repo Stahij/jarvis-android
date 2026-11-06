@@ -277,6 +277,7 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(12) })
         }
         actionButton("Скачать Qwen 2.5 3B • около 1,93 ГБ") { confirmQwenDownload() }
+        actionButton("Экспортировать модель в файл") { exportModelPicker() }
         actionButton("Импортировать GGUF-файл") { chooseModel() }
         actionButton("Назад") { modelScreenDialog?.dismiss() }
         modelScreenDialog = AlertDialog.Builder(this).setView(panel).create()
@@ -532,6 +533,89 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Export the private GGUF model using Android's system document picker. */
+    private fun exportModelPicker() {
+        if (!modelFile.exists() || modelFile.length() < 1024L * 1024L) {
+            AlertDialog.Builder(this).setTitle("Модель не найдена")
+                .setMessage("Сначала подключи или загрузи GGUF-модель.")
+                .setPositiveButton("Хорошо", null).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_TITLE, modelFile.name)
+        }
+        startActivityForResult(intent, REQUEST_EXPORT)
+    }
+
+    private fun exportModel(uri: Uri) {
+        val source = modelFile
+        if (!source.exists() || source.length() < 1024L * 1024L) {
+            addBubble("Система", "Модель не найдена или файл слишком мал для экспорта.", false)
+            return
+        }
+        val progress = ProgressDialog(this).apply {
+            setTitle("Экспорт модели Jarvis")
+            setMessage("Подготовка файла…")
+            setProgressStyle(ProgressDialog.STYLE_HORIZONTAL)
+            max = 100
+            setCancelable(false)
+            show()
+        }
+        executor.execute {
+            try {
+                val magic = ByteArray(4)
+                source.inputStream().use {
+                    if (it.read(magic) != 4 || String(magic, Charsets.US_ASCII) != "GGUF") {
+                        throw IllegalStateException("Файл модели не прошёл проверку GGUF.")
+                    }
+                }
+                val total = source.length()
+                var copied = 0L
+                contentResolver.openOutputStream(uri, "w")?.use { target ->
+                    source.inputStream().buffered().use { input ->
+                        val buffer = ByteArray(1024 * 1024)
+                        var lastUpdate = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            target.write(buffer, 0, count)
+                            copied += count
+                            val now = System.currentTimeMillis()
+                            if (now - lastUpdate > 500L) {
+                                lastUpdate = now
+                                val percent = ((copied * 100L) / total).toInt().coerceIn(0, 100)
+                                runOnUiThread {
+                                    progress.isIndeterminate = false
+                                    progress.progress = percent
+                                    progress.setMessage("Экспорт модели: ${copied / (1024L * 1024L)} / ${total / (1024L * 1024L)} МБ")
+                                }
+                            }
+                        }
+                        target.flush()
+                    }
+                } ?: throw IllegalStateException("Не удалось создать файл в выбранной папке.")
+                if (copied != total) throw IllegalStateException("Экспорт завершился не полностью.")
+                runOnUiThread {
+                    progress.dismiss()
+                    AlertDialog.Builder(this).setTitle("Экспорт завершён")
+                        .setMessage("Модель сохранена. Теперь открой Jarvis Lite → Модель → Импортировать GGUF-файл и выбери её.")
+                        .setPositiveButton("Готово", null).show()
+                    JarvisDiagnostics.event(this, "model_export_success", "bytes=$copied")
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    progress.dismiss()
+                    AlertDialog.Builder(this).setTitle("Ошибка экспорта")
+                        .setMessage(e.message ?: "Не удалось экспортировать модель.")
+                        .setPositiveButton("Закрыть", null).show()
+                    JarvisDiagnostics.event(this, "model_export_error", e.javaClass.simpleName + ": " + (e.message ?: ""))
+                }
+            }
+        }
+    }
+
     private fun chooseModel() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -556,6 +640,13 @@ class MainActivity : Activity() {
                     temporary.outputStream().use { target -> source.copyTo(target) }
                 } ?: throw IllegalStateException("Не удалось открыть выбранный файл")
 
+                val magic = ByteArray(4)
+                temporary.inputStream().use {
+                    if (it.read(magic) != 4 || String(magic, Charsets.US_ASCII) != "GGUF") {
+                        temporary.delete()
+                        throw IllegalStateException("Выбранный файл не является GGUF-моделью.")
+                    }
+                }
                 if (temporary.length() < 1024L * 1024L) {
                     temporary.delete()
                     throw IllegalStateException("Файл слишком маленький для GGUF-модели")
@@ -649,6 +740,9 @@ class MainActivity : Activity() {
         }
         if (requestCode == REQUEST_MODEL && resultCode == RESULT_OK) {
             data?.data?.let { importModel(it) }
+        }
+        if (requestCode == REQUEST_EXPORT && resultCode == RESULT_OK) {
+            data?.data?.let { exportModel(it) }
         }
         if (requestCode == REQUEST_VOICE) {
             val spoken = if (resultCode == RESULT_OK) {
@@ -1019,5 +1113,6 @@ class MainActivity : Activity() {
         private const val REQUEST_OVERLAY = 501
         private const val REQUEST_MODEL = 502
         private const val REQUEST_VOICE = 503
+        private const val REQUEST_EXPORT = 504
     }
 }
