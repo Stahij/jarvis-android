@@ -23,6 +23,7 @@ object InternetResearchTool {
     private const val MAX_EXTRACTED_CHARS = 24_000
     private const val CONNECT_TIMEOUT_MS = 12_000
     private const val READ_TIMEOUT_MS = 18_000
+    private const val MAX_REDIRECTS = 5
 
     fun search(query: String, limit: Int = 8): List<Source> {
         require(query.isNotBlank()) { "Поисковый запрос пуст." }
@@ -70,7 +71,7 @@ object InternetResearchTool {
         return Source(title, canonical, System.currentTimeMillis(), text)
     }
 
-    private fun request(address: String): String {
+    private fun request(address: String, redirectsRemaining: Int = MAX_REDIRECTS): String {
         require(isPublicHttpUrl(address)) { "Недопустимый адрес источника." }
         val connection = URL(address).openConnection() as HttpURLConnection
         try {
@@ -82,11 +83,14 @@ object InternetResearchTool {
             connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,text/plain,application/json")
             val code = connection.responseCode
             if (code in 300..399) {
+                if (redirectsRemaining <= 0) {
+                    throw IllegalStateException("Превышен лимит переадресаций.")
+                }
                 val location = connection.getHeaderField("Location")
                     ?: throw IllegalStateException("Источник вернул redirect без адреса.")
                 val next = resolve(address, location)
                 require(isPublicHttpUrl(next)) { "Переадресация на непубличный адрес заблокирована." }
-                return request(next)
+                return request(next, redirectsRemaining - 1)
             }
             if (code !in 200..299) {
                 val detail = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
