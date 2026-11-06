@@ -30,11 +30,12 @@
 - [ ] Замер `-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod` и числа потоков 2/3/4. R-06
 
 ### Этап 3: безопасность и контекст
-- [ ] Вырезать `<|…|>` из GitHub, веба и заметок перед вставкой в промпт (чистая функция + тесты). R-04
+- [x] Токенизация тел сообщений без спецтокенов (native) + `PromptSanitizer` на входе данных. R-04 (частично, см. TESTING)
 - [ ] Манифест: убрать `RECORD_AUDIO`, `network_security_config` вместо `cleartext=true`, `allowBackup=false`, `BootReceiver exported=false`. R-08
-- [ ] `InternetResearchTool`: лимит редиректов, один DNS-резолв, блок CGNAT и ULA, charset, внятная ошибка при капче. R-09
-- [ ] `GitHubChatTool`: ветка из `default_branch`, запуск по кнопке, а не по слову «ветк», бюджет в токенах, 1–2 нужных файла вместо восьми. R-07, R-11
-- [ ] `UpdateManager`: все подписанты + `versionCode` нового APK больше текущего. R-12
+- [x] `InternetResearchTool`: редиректы ≤ 5, один DNS-резолв, CGNAT/ULA, charset, капча. R-09 (DNS pinning не сделан)
+- [x] `GitHubChatTool`: `default_branch`, бюджет в токенах, 4 файла вместо восьми, проверка пути. R-07, R-11
+- [ ] Запуск GitHub-чтения по кнопке, а не по слову «ветк» (сейчас по ключевым словам). R-11
+- [x] `UpdateManager`: все подписанты, `versionCode`/`versionName`, префикс URL релиза. R-12
 
 ### Этап 4: интерфейс
 - [ ] Compose + Material 3 (минимум: XML + RecyclerView); разбить `MainActivity` на `ChatScreen`/`ChatViewModel`/`ModelManager`/`ToolRouter`. R-15

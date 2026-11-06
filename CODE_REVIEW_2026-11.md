@@ -11,7 +11,7 @@
 | R-01 | Нет стриминга и отмены. Ответ до 1024 токенов приходил целиком, ввод был заблокирован, остановить нельзя. | `native-lib.cpp`, `MainActivity` | ✅ этап 1 |
 | R-02 | Генерация привязана к Activity. Поворот экрана или закрытие посреди ответа теряли ответ, а нативный цикл продолжал держать мьютекс. | `MainActivity` | ✅ этапы 1–2 (проверить на устройстве) |
 | R-03 | `NewStringUTF` получал сырые байты модели, а вход шёл через `GetStringUTFChars`. Эмодзи и обрезанный на лимите многобайтовый символ дают мусор, под CheckJNI abort. | `native-lib.cpp` | ✅ этап 1 |
-| R-04 | Prompt injection. `llama_tokenize(parse_special=true)` разбирает и вставленные чужие данные: `<\|im_start\|>system…` из файла GitHub, веб-страницы или заметки превращается в настоящие control-токены. Пометка «недоверенные данные» этого не останавливает. | `native-lib.cpp`, `LlmEngine` (блок контекста) | ⬜ этап 3 |
+| R-04 | Prompt injection. Служебные токены из чужого текста (`<|im_start|>` в файле, заметке, веб-странице). | `native-lib.cpp`, `PromptSanitizer.kt`, `GitHubChatTool`, `InternetResearchTool`, `KnowledgeStore` | ◐ тела сообщений токенизируются без спецтокенов (`tokenize_chat_safe`), вход санитизируется; не-BPE модели на старом пути. Проверка: TESTING 18–19, 26 |
 | R-05 | Ошибки движка («Модель ещё не загружена» и т. п.) возвращались как обычный ответ и сохранялись в историю как реплика ассистента. | `native-lib.cpp` | ✅ этап 1 |
 
 ## Важно
@@ -19,12 +19,12 @@
 | ID | Проблема | Где | Статус |
 |---|---|---|---|
 | R-06 | Сборка llama.cpp: `GGML_NATIVE=OFF` без `-march`, возможно, собирается без dotprod. **Проверить** замером ток/с. Для Cortex-A76 (Snapdragon 732G) пробовать `-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod`. **Не** `armv8.7a`: там i8mm, которого у A76 нет, будет SIGILL. Опции дублируются в gradle и CMake. | `CMakeLists.txt`, `app/build.gradle.kts` | ⬜ |
-| R-07 | Бюджет контекста: до 7000 символов GitHub и 1800 символов заметок против лимита промпта 3072 токена (кириллица и код ≈ 2–3 символа на токен). В промпт идут только последние 4 сообщения. | `LlmEngine`, `MainActivity` | ⬜ |
+| R-07 | Бюджет контекста: раньше 7000 символов GitHub и 1800 заметок против лимита 3072 токена. | `ContextBudget.kt`, `LlmEngine` | ✅ бюджет в токенах на входе, нативный лимит остаётся последней защитой. Калибровка: TESTING 20 |
 | R-08 | Манифест: `RECORD_AUDIO` не используется (голос через `RecognizerIntent`); `usesCleartextTraffic=true`; `allowBackup=true` при ключе в Keystore (после восстановления токен не расшифруется); `BootReceiver exported=true` без нужды. | `AndroidManifest.xml` | ◐ `POST_NOTIFICATIONS` добавлен этапом 2, остальное ⬜ |
-| R-09 | `InternetResearchTool`: редиректы рекурсивно без лимита (цикл → StackOverflow); DNS резолвится дважды (rebinding); не блокируются 100.64.0.0/10 (CGNAT, Tailscale) и IPv6 ULA fc00::/7; любая страница читается как UTF-8 (cp1251 → кракозябры); выдача DuckDuckGo разбирается regex-ом и молча сломается на капче. | `InternetResearchTool.kt` | ⬜ |
+| R-09 | `InternetResearchTool`: редиректы без лимита, двойной DNS, не блокируются CGNAT и ULA, только UTF-8, капча DuckDuckGo молча даёт «ничего не найдено». | `InternetResearchTool.kt` | ◐ редиректы ≤ 5 с проверкой каждого хопа, один DNS-резолв, CGNAT/ULA блок, charset, понятная ошибка капчи. DNS rebinding закрыт не полностью (нужен pinning IP). TESTING 22–24 |
 | R-10 | CI: release-job привязан к именам feature-веток; `cancel-in-progress` может оборвать публикацию релиза; `contents: write` на debug-job; actions не закреплены по SHA. | `.github/workflows/android.yml` | ⬜ |
-| R-11 | `DEFAULT_BRANCH = "feature/local-brain-and-updater"` зашит в коде; удалите ветку, и инструмент получит 404. | `GitHubChatTool.kt` | ⬜ |
-| R-12 | `UpdateManager`: сверяется только первый подписант; `versionCode` скачанного APK не сверяется с тегом; SHA-256 берётся из того же GitHub, что и APK (настоящая защита это сверка подписи, и она есть). | `UpdateManager.kt` | ⬜ |
+| R-11 | Ветка `feature/local-brain-and-updater` зашита в коде; удалите её, и инструмент получит 404. | `GitHubChatTool.kt`, `GitHubRepositoryActivity.kt`, `GitHubAccessActivity.kt` | ◐ `GitHubChatTool` берёт `default_branch` из API; экраны по умолчанию `main`, а не `default_branch`. TESTING 21 |
+| R-12 | `UpdateManager`: сверяется только первый подписант; версия APK не сверяется с тегом; URL не ограничен релизами. | `UpdateManager.kt` | ◐ все подписанты, `versionName` и `versionCode`, префикс URL релиза, валидация тега. SHA из того же GitHub остаётся: защита держится на подписи. TESTING 25 |
 
 ## Гигиена
 

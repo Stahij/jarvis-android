@@ -48,7 +48,8 @@ sequenceDiagram
 5. **Один ход за раз.** `submit` возвращает `false`, если занято. Модель сериализует нативный `g_mutex`.
 6. **Токены в UI «вытягиваются»** (смещение `delivered`), а не «проталкиваются». Поэтому переоткрытие экрана не дублирует и не теряет текст.
 7. **`LlmService` всегда вызывает `startForeground` в `onStartCommand`.** Это требование Android после `startForegroundService`. Если ход уже закончился, сервис сразу гасит себя.
-8. Недоверенный контент (GitHub, веб, заметки) пока попадает в промпт без очистки спецтокенов, см. R-04 в [CODE_REVIEW](CODE_REVIEW_2026-11.md).
+8. **Недоверенный контент** (GitHub, веб, заметки) проходит `PromptSanitizer` на входе данных; тела сообщений в нативном коде токенизируются без спецтокенов (`tokenize_chat_safe`), служебные токены создаёт только шаблон. Если модель не BPE, включается старый путь (см. `safe_tokenization=0` в диагностике).
+9. **Бюджет контекста** `ContextBudget`: GitHub и заметки режутся по оценке токенов до `prompt ≤ 3072`. Нативный лимит остаётся последней линией защиты.
 
 ## JNI-контракт (`NativeLlm`)
 
@@ -58,7 +59,7 @@ sequenceDiagram
 | `nativeGenerate(roles, contents, maxTokens, listener)` | `Array<String>`, `Array<ByteArray>`, `Int`, `TokenListener?` → `ByteArray` (UTF-8). Ошибка → исключение. |
 | `nativeAbort()` | Без блокировок, безопасно из любого потока. |
 | `nativeUnload()` | Поднимает `g_abort`, затем освобождает модель. |
-| `nativeGetLastPerf()` | `key=value; ...`, включая `finish_reason` ∈ `eog`, `token_limit`, `aborted`, `listener_error`, `decode_error`, `not_started`. |
+| `nativeGetLastPerf()` | `key=value; ...`, включая `safe_tokenization` (0/1) и `finish_reason` ∈ `eog`, `token_limit`, `aborted`, `listener_error`, `decode_error`, `not_started`. |
 
 Колбэк `TokenListener.onToken(ByteArray)` вызывается **в потоке, который вызвал `generate`**. Если колбэк бросит исключение, цикл остановится (`listener_error`).
 
@@ -79,3 +80,12 @@ sequenceDiagram
 - Если систему убьёт процесс (нехватка памяти, агрессивная прошивка), ход теряется: в истории останется только сообщение пользователя.
 - «Стоп» в окне в миллисекунды между проверкой на стороне Kotlin и стартом нативной генерации игнорируется.
 - Часть прошивок (Xiaomi, Huawei и др.) убивает foreground-сервисы: проверьте исключение из оптимизации батареи.
+
+## Модули проверки входа (этап 3)
+
+| Файл | Роль |
+|---|---|
+| `PromptSanitizer.kt` | Экранирует `<\|`, `\|>`, подделки наших тегов (`</repository_file>`, `<saved_knowledge>`) и маркеры `[INST]`/`<<SYS>>`. Идемпотентна. |
+| `ContextBudget.kt` | Оценка токенов (кириллица ≈ 2 символа на токен, прочее ≈ 2.8) и обрезка по бюджету с пометкой. |
+| `Versions.kt` | Формат тега и сравнение версий без Android-классов. |
+| `native-lib.cpp: tokenize_chat_safe` | Склейка токенов: шаблон с спецтокенами, тела без них. Тест в `tests/native/` (см. TESTING). |

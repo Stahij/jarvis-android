@@ -1,0 +1,54 @@
+# Код-ревью v1.5.5 (ноябрь 2026)
+
+**Метод:** статическое чтение архива `jarvis-android-release-v1.5.5` целиком. Приложение не собиралось и не запускалось. Утверждения про скорость и поведение прошивок это **гипотезы**, они помечены «проверить».
+
+**Статусы:** ✅ исправлено · ◐ частично · ⬜ открыто. «Этап 1» и «этап 2» описаны в [ROADMAP_OPTIMIZATION.md](ROADMAP_OPTIMIZATION.md).
+
+## Критично
+
+| ID | Проблема | Где | Статус |
+|---|---|---|---|
+| R-01 | Нет стриминга и отмены. Ответ до 1024 токенов приходил целиком, ввод был заблокирован, остановить нельзя. | `native-lib.cpp`, `MainActivity` | ✅ этап 1 |
+| R-02 | Генерация привязана к Activity. Поворот экрана или закрытие посреди ответа теряли ответ, а нативный цикл продолжал держать мьютекс. | `MainActivity` | ✅ этапы 1–2 (проверить на устройстве) |
+| R-03 | `NewStringUTF` получал сырые байты модели, а вход шёл через `GetStringUTFChars`. Эмодзи и обрезанный на лимите многобайтовый символ дают мусор, под CheckJNI abort. | `native-lib.cpp` | ✅ этап 1 |
+| R-04 | Prompt injection. Служебные токены из чужого текста (`<|im_start|>` в файле, заметке, веб-странице). | `native-lib.cpp`, `PromptSanitizer.kt`, `GitHubChatTool`, `InternetResearchTool`, `KnowledgeStore` | ◐ тела сообщений токенизируются без спецтокенов (`tokenize_chat_safe`), вход санитизируется; не-BPE модели на старом пути. Проверка: TESTING 18–19, 26 |
+| R-05 | Ошибки движка («Модель ещё не загружена» и т. п.) возвращались как обычный ответ и сохранялись в историю как реплика ассистента. | `native-lib.cpp` | ✅ этап 1 |
+
+## Важно
+
+| ID | Проблема | Где | Статус |
+|---|---|---|---|
+| R-06 | Сборка llama.cpp: `GGML_NATIVE=OFF` без `-march`, возможно, собирается без dotprod. **Проверить** замером ток/с. Для Cortex-A76 (Snapdragon 732G) пробовать `-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod`. **Не** `armv8.7a`: там i8mm, которого у A76 нет, будет SIGILL. Опции дублируются в gradle и CMake. | `CMakeLists.txt`, `app/build.gradle.kts` | ⬜ |
+| R-07 | Бюджет контекста: раньше 7000 символов GitHub и 1800 заметок против лимита 3072 токена. | `ContextBudget.kt`, `LlmEngine` | ✅ бюджет в токенах на входе, нативный лимит остаётся последней защитой. Калибровка: TESTING 20 |
+| R-08 | Манифест: лишний `RECORD_AUDIO`; `usesCleartextTraffic=true`; `allowBackup=true` при ключе в Keystore; `BootReceiver exported=true` без нужды; нет `POST_NOTIFICATIONS`. | `AndroidManifest.xml` | ✅ этапы 2 и 4: `RECORD_AUDIO` убран (не запрашивался в рантайме), cleartext и backup выключены, BootReceiver не экспортирован, `ACCESS_NETWORK_STATE` добавлен. Проверка: TESTING 33–34 |
+| R-09 | `InternetResearchTool`: редиректы без лимита, двойной DNS, не блокируются CGNAT и ULA, только UTF-8, капча DuckDuckGo молча даёт «ничего не найдено». | `InternetResearchTool.kt` | ◐ редиректы ≤ 5 с проверкой каждого хопа, один DNS-резолв, CGNAT/ULA блок, charset, понятная ошибка капчи. DNS rebinding закрыт не полностью (нужен pinning IP). TESTING 22–24 |
+| R-10 | CI: release-job привязан к именам feature-веток; `cancel-in-progress` может оборвать публикацию релиза; `contents: write` на debug-job; actions не закреплены по SHA. | `.github/workflows/android.yml` | ⬜ |
+| R-11 | Ветка `feature/local-brain-and-updater` зашита в коде; удалите её, и инструмент получит 404. | `GitHubChatTool.kt`, `GitHubRepositoryActivity.kt`, `GitHubAccessActivity.kt` | ◐ `GitHubChatTool` берёт `default_branch` из API; экраны по умолчанию `main`, а не `default_branch`. TESTING 21 |
+| R-12 | `UpdateManager`: сверяется только первый подписант; версия APK не сверяется с тегом; URL не ограничен релизами. | `UpdateManager.kt` | ◐ все подписанты, `versionName` и `versionCode`, префикс URL релиза, валидация тега. SHA из того же GitHub остаётся: защита держится на подписи. TESTING 25 |
+
+## Гигиена
+
+| ID | Проблема | Статус |
+|---|---|---|
+| R-13 | Нет gradle wrapper, тестов, `.gitignore`, `LICENSE`. Сборка локально не воспроизводима. | ⬜ |
+| R-14 | README («0.1.0, debug APK») и `docs/RELEASE_SIGNING_SETUP.md` («пока Termux, апдейтер не реализован») не соответствуют коду. | ⬜ |
+| R-15 | `MainActivity` как god-class: UI кодом, `ProgressDialog` (deprecated), обычный `Activity`. | `MainActivity` | ◐ ход диалога вынесен в `LlmEngine`, разбор ответа в `MessageFormatter` и `ReplyPolicy`, персоны в `Personas` (`MainActivity` ~1000 строк). Compose и разбиение экранов не сделаны |
+| R-16 | История, заметки и диагностика это JSON в SharedPreferences, на каждое сообщение перезаписывается целиком. | ⬜ |
+| R-17 | Один executor на генерацию, сеть, загрузку модели и обновления. | ◐ ход вынесен в свой поток `jarvis-llm` |
+| R-18 | Проверка обновлений раз в 24 ч через `scheduleAtFixedRate` внутри Activity (живёт, пока открыт экран). | ⬜ WorkManager |
+| R-19 | Озвучка только после полного ответа; `moveTaskToBack` без предупреждения. | `MainActivity` | ◐ код-блоки не читаются вслух (`speakableText`); озвучка по предложениям во время генерации не сделана |
+| R-20 | `DiagnosticsActivity` написана минифицированной строкой и зашивает версию `1.3.0` в отчёт. | ⬜ |
+
+## Снятое замечание
+
+**R-00 (снято).** В первой версии ревью утверждалось, что фоновый «улучшатель промпта» вытесняет prefill-кэш. Это неверно: функция отключена ещё в 1.5.0 (`onTextChanged` пуст), оставался мёртвый код. Он удалён на этапе 1. Если встретите это замечание в чужих пересказах, это ошибка.
+
+## Что сделано хорошо (не ломайте)
+
+- Проверка подписи APK перед установкой обновления.
+- Закреплённый SHA-256 скачиваемой модели.
+- Токен GitHub хранится под ключом Keystore.
+- SSRF-фильтр в веб-инструменте (дыры отмечены в R-09, но основа верная).
+- Честная «квитанция» GitHub-чтения вместо выдуманного анализа.
+- Диагностика с метриками (prefill/decode, `cache_reused_tokens`) без текста чатов.
+- Повторное использование KV-кэша по общему префиксу.
