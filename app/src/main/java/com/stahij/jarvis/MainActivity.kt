@@ -67,8 +67,15 @@ class MainActivity : Activity() {
         window.statusBarColor = bg
         window.navigationBarColor = bg
         activePersona = prefs.getString("active_persona", "Общий помощник") ?: "Общий помощник"
+        val toolsOnly = intent.getBooleanExtra(EXTRA_TOOLS_ONLY, false)
         buildUi()
         tts = TextToSpeech(this) { }
+        if (toolsOnly) {
+            buildToolsUi()
+            val selectedSection = intent.getStringExtra(EXTRA_TOOLS_SECTION).orEmpty()
+            window.decorView.post { openToolsSection(selectedSection) }
+            return
+        }
         loadHistory()
         val selectedModel = prefs.getString("selected_model", "qwen")
         val startupModel = if (selectedModel == "mnn-pocket" && pocketModelFile.length() > 0L) {
@@ -86,6 +93,68 @@ class MainActivity : Activity() {
         promptScheduler.scheduleAtFixedRate(
             { maybeCheckForUpdates() }, 24, 24, TimeUnit.HOURS
         )
+    }
+
+    private fun buildToolsUi() {
+        val selectedModel = prefs.getString("selected_model", "qwen")
+        val selectedFile = if (selectedModel == "mnn-pocket") pocketModelFile else modelFile
+        modelReady = selectedFile.exists() && NativeLlm.loadedPath == selectedFile.absolutePath
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(14))
+            setBackgroundColor(bg)
+        }
+        root.addView(TextView(this).apply {
+            text = "J A R V I S"
+            textSize = 22f
+            setTextColor(cyan)
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        root.addView(TextView(this).apply {
+            text = "ОБЩЕЕ УПРАВЛЕНИЕ"
+            textSize = 12f
+            setTextColor(Color.rgb(104, 160, 181))
+            setPadding(0, dp(4), 0, dp(12))
+        })
+        status = TextView(this).apply {
+            text = if (modelReady) "ЛОКАЛЬНАЯ МОДЕЛЬ АКТИВНА" else "УПРАВЛЕНИЕ ПРИЛОЖЕНИЕМ"
+            textSize = 11f
+            setTextColor(Color.rgb(104, 160, 181))
+            setPadding(0, 0, 0, dp(14))
+        }
+        root.addView(status)
+
+        fun addAction(label: String, action: () -> Unit) {
+            root.addView(Button(this).apply {
+                text = label
+                isAllCaps = false
+                textSize = 15f
+                setTextColor(cyan)
+                setBackgroundColor(Color.rgb(12, 36, 53))
+                setOnClickListener { action() }
+            }, LinearLayout.LayoutParams(-1, dp(50)).apply { bottomMargin = dp(9) })
+        }
+
+        addAction("Модели и загрузки") { openToolsSection("model") }
+        addAction("Интернет и знания") { openToolsSection("knowledge") }
+        addAction("GitHub • управление") { openToolsSection("github_access") }
+        addAction("GitHub • репозиторий") { openToolsSection("github_repo") }
+        addAction("Диагностика и журнал") { openToolsSection("diagnostics") }
+        addAction("Проверка обновлений") { openToolsSection("updates") }
+        addAction("Назад к чатам") { finish() }
+        setContentView(root)
+    }
+
+    private fun openToolsSection(section: String) {
+        when (section) {
+            "model" -> showModelScreen()
+            "knowledge" -> startActivity(Intent(this, OnlineKnowledgeActivity::class.java))
+            "github_access" -> startActivity(Intent(this, GitHubAccessActivity::class.java))
+            "github_repo" -> startActivity(Intent(this, GitHubRepositoryActivity::class.java))
+            "diagnostics" -> JarvisDiagnostics.show(this)
+            "updates" -> checkForUpdates(manual = true)
+        }
     }
 
     private fun buildUi() {
@@ -1185,6 +1254,8 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        const val EXTRA_TOOLS_ONLY = "com.stahij.jarvis.EXTRA_TOOLS_ONLY"
+        const val EXTRA_TOOLS_SECTION = "com.stahij.jarvis.EXTRA_TOOLS_SECTION"
         private const val MNN_POCKET_MODEL_URL = "https://huggingface.co/taobao-mnn/MNN-Pocket-0.3B-GGUF/resolve/main/MNN-Pocket-0.3B-Instruct-Q4_1.gguf"
         private const val QWEN_MODEL_URL = "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
         private const val QWEN_MODEL_SHA256 = "9c9f56a391a3abbd5b89d0245bf6106081bcc3173119d4229235dd9d23253f94"
