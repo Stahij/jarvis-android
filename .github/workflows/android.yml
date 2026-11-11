@@ -5,7 +5,7 @@ on:
     branches: [ "main", "preview/**", "release/**", "release-signing-bootstrap", "feature/**" ]
     tags: [ "v*" ]
   pull_request:
-    branches: [ "feature/qwen-2.5-3b-instruct" ]
+    branches: [ "feature/qwen-2.5-3b-instruct", "release/v1.5.5" ]
   workflow_dispatch:
     inputs:
       build_release:
