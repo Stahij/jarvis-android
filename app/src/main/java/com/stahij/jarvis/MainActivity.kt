@@ -479,7 +479,10 @@ class MainActivity : Activity() {
                     setRequestProperty("User-Agent", "Jarvis-Android")
                     if (offset > 0L) setRequestProperty("Range", "bytes=$offset-")
                 }
+                // Hugging Face ETag/X-Linked-ETag is not a guaranteed SHA-256
+                // for every delivery path. Only trust an explicit checksum header.
                 var expectedSha256: String? = null
+                var expectedLength: Long? = null
                 try {
                     val code = connection.responseCode
                     if (code !in 200..299) throw IllegalStateException("Сервер модели вернул HTTP $code")
@@ -487,13 +490,13 @@ class MainActivity : Activity() {
                         part.delete()
                         offset = 0L
                     }
-                    expectedSha256 = (connection.getHeaderField("X-Linked-ETag")
-                        ?: connection.getHeaderField("ETag"))
+                    expectedSha256 = connection.getHeaderField("X-Checksum-Sha256")
                         ?.trim()?.trim('"')
                         ?.takeIf { it.matches(Regex("[a-fA-F0-9]{64}")) }
                     val total = if (code == 206) {
                         connection.getHeaderField("Content-Range")?.substringAfterLast('/')?.toLongOrNull()?.takeIf { it > 0L }
                     } else connection.contentLengthLong.takeIf { it > 0L }
+                    expectedLength = total
                     connection.inputStream.use { source ->
                         java.io.FileOutputStream(part, offset > 0L).use { target ->
                             val buffer = ByteArray(256 * 1024)
@@ -520,8 +523,9 @@ class MainActivity : Activity() {
                 } finally {
                     connection.disconnect()
                 }
-                if (part.length() < 150L * 1024L * 1024L) {
-                    throw IllegalStateException("Загрузка неполная: ожидается файл около 192 МБ. Повтори загрузку — она продолжится.")
+                if (part.length() < 150L * 1024L * 1024L ||
+                    (expectedLength != null && part.length() != expectedLength)) {
+                    throw IllegalStateException("Загрузка неполная или размер файла не совпадает с сервером. Повтори загрузку — она продолжится.")
                 }
                 val magic = ByteArray(4)
                 part.inputStream().use { if (it.read(magic) != 4) throw IllegalStateException("Не удалось проверить GGUF-файл") }
@@ -544,7 +548,7 @@ class MainActivity : Activity() {
                     }
                     if (!actualSha256.equals(expectedSha256, ignoreCase = true)) {
                         part.delete()
-                        throw IllegalStateException("Контрольная сумма MNN-Pocket не совпала. Повреждённый файл удалён.")
+                        throw IllegalStateException("SHA-256 MNN-Pocket не совпал с контрольной суммой сервера. Файл удалён.")
                     }
                 }
                 if (pocketModelFile.exists()) pocketModelFile.delete()
@@ -647,8 +651,7 @@ class MainActivity : Activity() {
                                         status.text = if (percent != null) "СКАЧИВАЮ QWEN 3B • $percent%"
                                             else "СКАЧИВАЮ QWEN 3B • ${downloaded / (1024L * 1024L)} МБ"
                                     }
-                                }
-                            }
+                                }                            }
                             target.fd.sync()
                         }
                     }
