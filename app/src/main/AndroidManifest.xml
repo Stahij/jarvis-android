@@ -16,8 +16,8 @@
         <activity android:name=".GitHubRepositoryActivity" android:exported="false" />
         <activity android:name=".GitHubAccessActivity" android:exported="false" />
         <activity android:name=".OnlineKnowledgeActivity" android:exported="false" />
-
-        <activity android:name=".MainActivity" android:exported="true">
+        <activity android:name=".MainActivity" android:exported="false" />
+        <activity android:name=".ChatHubActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
