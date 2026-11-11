@@ -124,7 +124,7 @@ class ChatHubActivity : Activity() {
     private fun showChatList() {
         currentChatId = null
         val root = baseLayout()
-        root.addView(header("J A R V I S  •  ЧАТЫ", false) { showGlobalMenu(root) })
+        root.addView(header("J A R V I S  •  ЧАТЫ", false) { showGlobalMenu() })
         status = TextView(this).apply {
             textSize = 11f
             setTextColor(Color.rgb(104, 160, 181))
@@ -178,18 +178,38 @@ class ChatHubActivity : Activity() {
             })
             list.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
-        root.addView(button("Управление моделями • диагностика • GitHub") { openTools() },
+        root.addView(button("Общее меню Jarvis") { showGlobalMenu() },
             LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
         setContentView(root)
         loadModelIfAvailable()
     }
 
-    private fun showGlobalMenu(anchor: View) {
+    private fun showGlobalMenu() {
+        val items = arrayOf(
+            "Создать новый чат",
+            "Список чатов",
+            "Модели и загрузки",
+            "Интернет и знания",
+            "GitHub • управление",
+            "GitHub • репозиторий",
+            "Диагностика и журнал",
+            "Проверить обновления"
+        )
         AlertDialog.Builder(this)
-            .setTitle("Jarvis")
-            .setItems(arrayOf("Создать новый чат", "Управление моделями, диагностика и GitHub")) { _, which ->
-                if (which == 0) createChat() else openTools()
+            .setTitle("Общее меню Jarvis")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> createChat()
+                    1 -> showChatList()
+                    2 -> openTools("model")
+                    3 -> openTools("knowledge")
+                    4 -> openTools("github_access")
+                    5 -> openTools("github_repo")
+                    6 -> openTools("diagnostics")
+                    7 -> openTools("updates")
+                }
             }
+            .setNegativeButton("Закрыть", null)
             .show()
     }
 
@@ -456,8 +476,12 @@ class ChatHubActivity : Activity() {
         if (currentChatId == null) showChatList() else showConversation()
     }
 
-    private fun openTools() {
-        startActivity(Intent(this, MainActivity::class.java))
+    private fun openTools(section: String) {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_TOOLS_ONLY, true)
+                .putExtra(MainActivity.EXTRA_TOOLS_SECTION, section)
+        )
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
