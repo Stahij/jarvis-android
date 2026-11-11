@@ -103,7 +103,7 @@ class ChatStore(context: Context) {
             val migrated = JarvisChat(
                 id = UUID.randomUUID().toString(),
                 title = if (legacy.length() > 0) "Предыдущий диалог" else "Новый чат",
-                systemPrompt = defaultPrompt() + "\n\nТекущая роль: $persona. " + personaPrompt(persona),
+                systemPrompt = personaPrompt(persona),
                 messages = legacy
             )
             chats.add(migrated)
