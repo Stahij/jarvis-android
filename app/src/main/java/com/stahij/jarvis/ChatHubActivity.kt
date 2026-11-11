@@ -12,7 +12,6 @@ import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONArray
@@ -179,18 +178,19 @@ class ChatHubActivity : Activity() {
             })
             list.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
-        root.addView(button("Инструменты, модели и GitHub") { openTools() },
+        root.addView(button("Управление моделями • диагностика • GitHub") { openTools() },
             LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
         setContentView(root)
         loadModelIfAvailable()
     }
 
     private fun showGlobalMenu(anchor: View) {
-        PopupMenu(this, anchor).apply {
-            menu.add("Инструменты и модели").setOnMenuItemClickListener { openTools(); true }
-            menu.add("Создать чат").setOnMenuItemClickListener { createChat(); true }
-            show()
-        }
+        AlertDialog.Builder(this)
+            .setTitle("Jarvis")
+            .setItems(arrayOf("Создать новый чат", "Управление моделями, диагностика и GitHub")) { _, which ->
+                if (which == 0) createChat() else openTools()
+            }
+            .show()
     }
 
     private fun createChat() {
@@ -404,34 +404,41 @@ class ChatHubActivity : Activity() {
     }
 
     private fun showChatActions(anchor: View, chat: JarvisChat) {
-        PopupMenu(this, anchor).apply {
-            menu.add("Изменить название").setOnMenuItemClickListener { renameChat(chat); true }
-            menu.add("Изменить системный промпт").setOnMenuItemClickListener { editSystemPrompt(chat); true }
-            menu.add(if (chat.pinned) "Открепить" else "Закрепить").setOnMenuItemClickListener {
-                store.setPinned(chat.id, !chat.pinned); refreshCurrent(); true
+        val items = arrayOf(
+            "Изменить название",
+            "Изменить системный промпт",
+            if (chat.pinned) "Открепить" else "Закрепить",
+            "Сбросить историю, сохранив промпт",
+            if (chat.archived) "Вернуть из архива" else "В архив",
+            "Удалить чат"
+        )
+        AlertDialog.Builder(this)
+            .setTitle(chat.title)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> renameChat(chat)
+                    1 -> editSystemPrompt(chat)
+                    2 -> { store.setPinned(chat.id, !chat.pinned); refreshCurrent() }
+                    3 -> AlertDialog.Builder(this)
+                        .setMessage("Очистить сообщения этого чата? Инструкции останутся.")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Очистить") { _, _ -> store.reset(chat.id); refreshCurrent() }
+                        .show()
+                    4 -> { store.setArchived(chat.id, !chat.archived); showChatList() }
+                    5 -> AlertDialog.Builder(this)
+                        .setMessage("Удалить чат «${chat.title}» без возможности восстановления?")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Удалить") { _, _ ->
+                            store.delete(chat.id)
+                            if (currentChatId == chat.id) currentChatId = null
+                            if (store.all(includeArchived = false).isEmpty()) store.create()
+                            showChatList()
+                        }
+                        .show()
+                }
             }
-            menu.add("Сбросить историю, сохранив промпт").setOnMenuItemClickListener {
-                AlertDialog.Builder(this@ChatHubActivity).setMessage("Очистить сообщения этого чата? Инструкции останутся.")
-                    .setNegativeButton("Отмена", null)
-                    .setPositiveButton("Очистить") { _, _ -> store.reset(chat.id); refreshCurrent() }.show()
-                true
-            }
-            menu.add(if (chat.archived) "Вернуть из архива" else "В архив").setOnMenuItemClickListener {
-                store.setArchived(chat.id, !chat.archived); showChatList(); true
-            }
-            menu.add("Удалить чат").setOnMenuItemClickListener {
-                AlertDialog.Builder(this@ChatHubActivity).setMessage("Удалить чат «${chat.title}» без возможности восстановления?")
-                    .setNegativeButton("Отмена", null)
-                    .setPositiveButton("Удалить") { _, _ ->
-                        store.delete(chat.id)
-                        if (currentChatId == chat.id) currentChatId = null
-                        if (store.all(includeArchived = false).isEmpty()) store.create()
-                        showChatList()
-                    }.show()
-                true
-            }
-            show()
-        }
+            .setNegativeButton("Закрыть", null)
+            .show()
     }
 
     private fun renameChat(chat: JarvisChat) {
@@ -444,9 +451,6 @@ class ChatHubActivity : Activity() {
                 refreshCurrent()
             }.show()
     }
-
-    private fun showChatActions(anchor: View, chat: JarvisChat, unused: Unit = Unit) =
-        showChatActions(anchor, chat)
 
     private fun refreshCurrent() {
         if (currentChatId == null) showChatList() else showConversation()
