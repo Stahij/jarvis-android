@@ -59,6 +59,7 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("jarvis", MODE_PRIVATE) }
     private val history = JSONArray()
     private val modelFile by lazy { File(File(filesDir, "models"), "qwen2.5-3b-instruct-q4_k_m.gguf") }
+    private val pocketModelFile by lazy { File(File(filesDir, "models"), "mnn-pocket-0.3b-q4_1.gguf") }
     private val legacyModelFile by lazy { File(File(filesDir, "models"), "qwen-coder.gguf") }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,8 +70,15 @@ class MainActivity : Activity() {
         buildUi()
         tts = TextToSpeech(this) { }
         loadHistory()
-        if (modelFile.exists() && modelFile.length() > 0L) {
-            loadLocalModel(modelFile)
+        val selectedModel = prefs.getString("selected_model", "qwen")
+        val startupModel = if (selectedModel == "mnn-pocket" && pocketModelFile.length() > 0L) {
+            pocketModelFile
+        } else {
+            if (selectedModel == "mnn-pocket") prefs.edit().putString("selected_model", "qwen").apply()
+            modelFile
+        }
+        if (startupModel.exists() && startupModel.length() > 0L) {
+            loadLocalModel(startupModel)
         } else {
             status.text = "ОЖИДАЕТ ПОДКЛЮЧЕНИЯ МОДЕЛИ"
         }
@@ -259,9 +267,11 @@ class MainActivity : Activity() {
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(cyan)
         })
+        val selectedModel = prefs.getString("selected_model", "qwen")
+        val selectedLabel = if (selectedModel == "mnn-pocket") "MNN-Pocket-0.3B Q4_1" else "Qwen 2.5 3B"
         panel.addView(TextView(this).apply {
-            text = if (modelReady) "Локальная модель готова к работе"
-                else if (modelFile.exists()) "Модель найдена • требуется подключение"
+            text = if (modelReady) "Активна: $selectedLabel"
+                else if (pocketModelFile.exists() || modelFile.exists()) "Модель найдена • требуется подключение"
                 else "Локальная модель не установлена"
             textSize = 14f
             setTextColor(Color.LTGRAY)
@@ -275,6 +285,9 @@ class MainActivity : Activity() {
                 setBackgroundColor(Color.rgb(12, 36, 53))
                 setOnClickListener { action() }
             }, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(12) })
+        }
+        actionButton(if (pocketModelFile.exists()) "Использовать MNN-Pocket 0.3B Q4_1" else "Скачать MNN-Pocket 0.3B Q4_1 • около 192 МБ") {
+            confirmPocketDownload()
         }
         actionButton("Скачать Qwen 2.5 3B • около 1,93 ГБ") { confirmQwenDownload() }
         actionButton("Импортировать GGUF-файл") { chooseModel() }
@@ -416,6 +429,145 @@ class MainActivity : Activity() {
         }
     }
 
+
+    private fun confirmPocketDownload() {
+        if (pocketModelFile.exists() && pocketModelFile.length() > 150L * 1024L * 1024L) {
+            AlertDialog.Builder(this)
+                .setTitle("MNN-Pocket уже загружена")
+                .setMessage("Использовать компактную модель MNN-Pocket-0.3B Q4_1 или скачать файл заново?")
+                .setNegativeButton("Отмена", null)
+                .setNeutralButton("Скачать заново") { _, _ -> downloadPocketModel() }
+                .setPositiveButton("Использовать") { _, _ -> activatePocketModel() }
+                .show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Загрузить MNN-Pocket")
+            .setMessage("MNN-Pocket-0.3B Instruct Q4_1 — около 192 МБ. Это отдельная модель; Qwen останется на месте. Файл будет храниться локально в памяти приложения. Нужен интернет только для загрузки.")
+            .setNegativeButton("Позже", null)
+            .setPositiveButton("Загрузить") { _, _ -> downloadPocketModel() }
+            .show()
+    }
+
+    private fun activatePocketModel() {
+        if (!pocketModelFile.exists() || pocketModelFile.length() < 150L * 1024L * 1024L) {
+            confirmPocketDownload()
+            return
+        }
+        prefs.edit().putString("selected_model", "mnn-pocket").apply()
+        NativeLlm.invalidate()
+        modelScreenDialog?.dismiss()
+        loadLocalModel(pocketModelFile)
+    }
+
+    private fun downloadPocketModel() {
+        sendButton.isEnabled = false
+        status.text = "ГОТОВЛЮ ЗАГРУЗКУ MNN-POCKET..."
+        executor.execute {
+            try {
+                val directory = pocketModelFile.parentFile ?: throw IllegalStateException("Нет папки моделей")
+                if (!directory.exists() && !directory.mkdirs()) {
+                    throw IllegalStateException("Не удалось создать папку модели")
+                }
+                val part = File(directory, "mnn-pocket-0.3b-q4_1.gguf.part")
+                val url = java.net.URL(MNN_POCKET_MODEL_URL)
+                var offset = if (part.exists()) part.length() else 0L
+                val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 20000
+                    readTimeout = 90000
+                    instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", "Jarvis-Android")
+                    if (offset > 0L) setRequestProperty("Range", "bytes=$offset-")
+                }
+                var expectedSha256: String? = null
+                try {
+                    val code = connection.responseCode
+                    if (code !in 200..299) throw IllegalStateException("Сервер модели вернул HTTP $code")
+                    if (offset > 0L && code != 206) {
+                        part.delete()
+                        offset = 0L
+                    }
+                    expectedSha256 = (connection.getHeaderField("X-Linked-ETag")
+                        ?: connection.getHeaderField("ETag"))
+                        ?.trim()?.trim('"')
+                        ?.takeIf { it.matches(Regex("[a-fA-F0-9]{64}")) }
+                    val total = if (code == 206) {
+                        connection.getHeaderField("Content-Range")?.substringAfterLast('/')?.toLongOrNull()?.takeIf { it > 0L }
+                    } else connection.contentLengthLong.takeIf { it > 0L }
+                    connection.inputStream.use { source ->
+                        java.io.FileOutputStream(part, offset > 0L).use { target ->
+                            val buffer = ByteArray(256 * 1024)
+                            var downloaded = offset
+                            var lastUpdate = 0L
+                            while (true) {
+                                val count = source.read(buffer)
+                                if (count < 0) break
+                                target.write(buffer, 0, count)
+                                downloaded += count
+                                val now = System.currentTimeMillis()
+                                if (now - lastUpdate > 700L) {
+                                    lastUpdate = now
+                                    val percent = total?.let { ((downloaded * 100L) / it).coerceIn(0L, 100L) }
+                                    runOnUiThread {
+                                        status.text = if (percent != null) "MNN-POCKET • $percent%"
+                                            else "MNN-POCKET • ${downloaded / (1024L * 1024L)} МБ"
+                                    }
+                                }
+                            }
+                            target.fd.sync()
+                        }
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+                if (part.length() < 150L * 1024L * 1024L) {
+                    throw IllegalStateException("Загрузка неполная: ожидается файл около 192 МБ. Повтори загрузку — она продолжится.")
+                }
+                val magic = ByteArray(4)
+                part.inputStream().use { if (it.read(magic) != 4) throw IllegalStateException("Не удалось проверить GGUF-файл") }
+                if (String(magic, Charsets.US_ASCII) != "GGUF") {
+                    part.delete()
+                    throw IllegalStateException("Сервер вернул не GGUF-модель. Файл удалён.")
+                }
+                if (expectedSha256 != null) {
+                    val digest = java.security.MessageDigest.getInstance("SHA-256")
+                    part.inputStream().buffered().use { stream ->
+                        val buffer = ByteArray(1024 * 1024)
+                        while (true) {
+                            val count = stream.read(buffer)
+                            if (count < 0) break
+                            digest.update(buffer, 0, count)
+                        }
+                    }
+                    val actualSha256 = digest.digest().joinToString("") {
+                        (it.toInt() and 0xff).toString(16).padStart(2, '0')
+                    }
+                    if (!actualSha256.equals(expectedSha256, ignoreCase = true)) {
+                        part.delete()
+                        throw IllegalStateException("Контрольная сумма MNN-Pocket не совпала. Повреждённый файл удалён.")
+                    }
+                }
+                if (pocketModelFile.exists()) pocketModelFile.delete()
+                if (!part.renameTo(pocketModelFile)) {
+                    part.copyTo(pocketModelFile, overwrite = true)
+                    part.delete()
+                }
+                runOnUiThread {
+                    prefs.edit().putString("selected_model", "mnn-pocket").apply()
+                    NativeLlm.invalidate()
+                    modelScreenDialog?.dismiss()
+                    status.text = "ПОДКЛЮЧАЮ MNN-POCKET..."
+                    loadLocalModel(pocketModelFile)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "ЗАГРУЗКА MNN-POCKET ПРЕРВАНА"
+                    addBubble("Система", e.message ?: "Не удалось скачать модель. Незавершённая загрузка сохранена для продолжения.", false)
+                }
+            }
+        }
+    }
+
     private fun confirmQwenDownload() {
         if (modelFile.exists() && modelFile.length() > 500L * 1024L * 1024L) {
             AlertDialog.Builder(this)
@@ -519,6 +671,7 @@ class MainActivity : Activity() {
                     part.delete()
                 }
                 runOnUiThread {
+                    prefs.edit().putString("selected_model", "qwen").apply()
                     NativeLlm.invalidate()
                     status.text = "ПОДКЛЮЧАЮ МОДЕЛЬ..."
                     loadLocalModel(modelFile)
@@ -566,6 +719,7 @@ class MainActivity : Activity() {
                     temporary.delete()
                 }
                 runOnUiThread {
+                    prefs.edit().putString("selected_model", "qwen").apply()
                     NativeLlm.invalidate()
                     loadLocalModel(modelFile)
                 }
@@ -596,7 +750,7 @@ class MainActivity : Activity() {
                         }
                         modelReady = true
                         sendButton.isEnabled = true
-                        status.text = "ГОТОВ К ДИАЛОГУ"
+                        status.text = if (file.absolutePath == pocketModelFile.absolutePath) "ГОТОВ • MNN-POCKET 0.3B" else "ГОТОВ К ДИАЛОГУ"
                     } else {
                         JarvisDiagnostics.event(this, "model_load_error", "duration_ms=${android.os.SystemClock.elapsedRealtime() - loadStartedAt}; error=${error.take(240)}")
                         status.text = "НЕ УДАЛОСЬ ЗАГРУЗИТЬ МОДЕЛЬ"
@@ -1014,6 +1168,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val MNN_POCKET_MODEL_URL = "https://huggingface.co/taobao-mnn/MNN-Pocket-0.3B-GGUF/resolve/main/MNN-Pocket-0.3B-Instruct-Q4_1.gguf"
         private const val QWEN_MODEL_URL = "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
         private const val QWEN_MODEL_SHA256 = "9c9f56a391a3abbd5b89d0245bf6106081bcc3173119d4229235dd9d23253f94"
         private const val REQUEST_OVERLAY = 501
