@@ -139,6 +139,7 @@ jobs:
           path: release/Jarvis-release.apk
           if-no-files-found: error
           retention-days: 30
+      # Keep the release branch suffix aligned with app/build.gradle.kts versionName.
       - name: Resolve release tag from app version
         id: release_tag
         if: startsWith(github.ref, 'refs/heads/release/')
