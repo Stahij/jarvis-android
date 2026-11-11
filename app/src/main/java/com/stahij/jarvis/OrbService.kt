@@ -59,7 +59,7 @@ class OrbService : Service() {
             )
         }
         val openIntent = PendingIntent.getActivity(
-            this, 10, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            this, 10, Intent(this, ChatHubActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val stopIntent = PendingIntent.getService(
@@ -135,7 +135,7 @@ class OrbService : Service() {
                         prefs.edit().putInt(KEY_X, params.x).putInt(KEY_Y, params.y).apply()
                     } else {
                         startActivity(
-                            Intent(this, MainActivity::class.java)
+                            Intent(this, ChatHubActivity::class.java)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         )
                     }
