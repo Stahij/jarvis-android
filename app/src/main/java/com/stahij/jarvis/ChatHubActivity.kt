@@ -208,7 +208,7 @@ class ChatHubActivity : Activity() {
     private fun showConversation() {
         val chat = currentChat() ?: return showChatList()
         val root = baseLayout()
-        root.addView(header(chat.title) { showChatActions(root, chat) })
+        root.addView(header(chat.title, true) { showChatActions(root, chat) })
         status = TextView(this).apply {
             text = if (modelReady) "ЛОКАЛЬНАЯ МОДЕЛЬ ГОТОВА" else "МОДЕЛЬ ЗАГРУЖАЕТСЯ ИЛИ НЕ УСТАНОВЛЕНА"
             textSize = 10f
