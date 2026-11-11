@@ -561,6 +561,7 @@ class MainActivity : Activity() {
                 }
             } catch (e: Exception) {
                 runOnUiThread {
+                    sendButton.isEnabled = modelReady
                     status.text = "ЗАГРУЗКА MNN-POCKET ПРЕРВАНА"
                     addBubble("Система", e.message ?: "Не удалось скачать модель. Незавершённая загрузка сохранена для продолжения.", false)
                 }
