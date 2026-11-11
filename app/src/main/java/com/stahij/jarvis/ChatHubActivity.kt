@@ -408,7 +408,7 @@ class ChatHubActivity : Activity() {
                     .setPositiveButton("Удалить") { _, _ ->
                         store.delete(chat.id)
                         if (currentChatId == chat.id) currentChatId = null
-                        if (store.all().isEmpty()) store.create()
+                        if (store.all(includeArchived = false).isEmpty()) store.create()
                         showChatList()
                     }.show()
                 true
