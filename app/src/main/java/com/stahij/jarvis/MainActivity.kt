@@ -289,7 +289,7 @@ class MainActivity : Activity() {
         actionButton(if (pocketModelFile.exists()) "Использовать MNN-Pocket 0.3B Q4_1" else "Скачать MNN-Pocket 0.3B Q4_1 • около 192 МБ") {
             confirmPocketDownload()
         }
-        actionButton("Скачать Qwen 2.5 3B • около 1,93 ГБ") { confirmQwenDownload() }
+        actionButton(if (modelFile.exists()) "Использовать Qwen 2.5 3B" else "Скачать Qwen 2.5 3B • около 1,93 ГБ") { confirmQwenDownload() }
         actionButton("Импортировать GGUF-файл") { chooseModel() }
         actionButton("Назад") { modelScreenDialog?.dismiss() }
         modelScreenDialog = AlertDialog.Builder(this).setView(panel).create()
@@ -569,13 +569,25 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun activateQwenModel() {
+        if (!modelFile.exists() || modelFile.length() < 500L * 1024L * 1024L) {
+            confirmQwenDownload()
+            return
+        }
+        prefs.edit().putString("selected_model", "qwen").apply()
+        NativeLlm.invalidate()
+        modelScreenDialog?.dismiss()
+        loadLocalModel(modelFile)
+    }
+
     private fun confirmQwenDownload() {
         if (modelFile.exists() && modelFile.length() > 500L * 1024L * 1024L) {
             AlertDialog.Builder(this)
-                .setTitle("Модель уже загружена")
-                .setMessage("Заменить текущую модель? Будет загружена Qwen2.5-3B-Instruct Q4_K_M размером около 1,93 ГБ.")
+                .setTitle("Qwen уже загружена")
+                .setMessage("Использовать установленную Qwen2.5-3B или скачать её заново?")
                 .setNegativeButton("Отмена", null)
-                .setPositiveButton("Заменить") { _, _ -> downloadQwenModel() }
+                .setNeutralButton("Скачать заново") { _, _ -> downloadQwenModel() }
+                .setPositiveButton("Использовать") { _, _ -> activateQwenModel() }
                 .show()
             return
         }
@@ -679,6 +691,7 @@ class MainActivity : Activity() {
                 }
             } catch (e: Exception) {
                 runOnUiThread {
+                    sendButton.isEnabled = modelReady
                     status.text = "ЗАГРУЗКА МОДЕЛИ ПРЕРВАНА"
                     addBubble("Система", e.message ?: "Не удалось скачать модель. Незавершённая загрузка сохранена для продолжения.", false)
                 }
