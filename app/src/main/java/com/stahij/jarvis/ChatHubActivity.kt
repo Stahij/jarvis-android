@@ -84,7 +84,7 @@ class ChatHubActivity : Activity() {
                     AlertDialog.Builder(this)
                         .setTitle("Не удалось запустить модель")
                         .setMessage(error)
-                        .setPositiveButton("Открыть управление моделями") { _, _ -> openTools() }
+                        .setPositiveButton("Открыть управление моделями") { _, _ -> openTools("model") }
                         .setNegativeButton("Закрыть", null)
                         .show()
                 }
