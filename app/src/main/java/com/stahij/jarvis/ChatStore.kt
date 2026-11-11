@@ -37,7 +37,7 @@ class ChatStore(context: Context) {
     fun find(id: String): JarvisChat? = chats.firstOrNull { it.id == id }
 
     @Synchronized
-    fun create(title: String = "Новый чат", prompt: String = defaultPrompt()): JarvisChat {
+    fun create(title: String = "Новый чат", prompt: String = templates().getValue("Общий помощник")): JarvisChat {
         val chat = JarvisChat(UUID.randomUUID().toString(), title, prompt)
         chats.add(chat)
         persist()
@@ -69,7 +69,7 @@ class ChatStore(context: Context) {
 
     @Synchronized
     fun reset(id: String) {
-        find(id)?.let { it.messages.clear(); it.updatedAt = System.currentTimeMillis(); persist() }
+        find(id)?.let { chat -> while (chat.messages.length() > 0) chat.messages.remove(0); chat.updatedAt = System.currentTimeMillis(); persist() }
     }
 
     private fun load() {
