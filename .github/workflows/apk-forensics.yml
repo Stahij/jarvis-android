@@ -1,0 +1,130 @@
+name: APK forensic analysis
+
+on:
+  push:
+    branches:
+      - analysis/apk-forensics
+    paths:
+      - .github/workflows/apk-forensics.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Install analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apktool unzip zip file
+      - name: Download target APK
+        run: |
+          mkdir -p work
+          curl -fL --retry 3 \
+            "https://github.com/Stahij/jarvis-android/releases/download/apk-analysis-1/jarvis-0.1.0.apk" \
+            -o work/target.apk
+          echo "79fa259577c1a966cc166c1fa4671a605243375cdaf9448472e0cd5a71f72152  work/target.apk" | sha256sum -c -
+          file work/target.apk
+          unzip -l work/target.apk > work/apk-contents.txt
+      - name: Install JADX
+        run: |
+          JADX_URL="$(curl -fsSL https://api.github.com/repos/skylot/jadx/releases/latest | jq -r '[.assets[] | select(.name | endswith(".zip"))][0].browser_download_url')"
+          test -n "$JADX_URL" && test "$JADX_URL" != "null"
+          curl -fL --retry 3 "$JADX_URL" -o work/jadx.zip
+          mkdir -p work/jadx
+          unzip -q work/jadx.zip -d work/jadx
+          chmod +x work/jadx/bin/jadx
+      - name: Decode APK resources and manifest
+        run: |
+          apktool d -f work/target.apk -o work/apktool-out
+      - name: Decompile DEX code with JADX
+        run: |
+          work/jadx/bin/jadx --show-bad-code -d work/jadx-out work/target.apk
+      - name: Build technical inventory
+        run: |
+          python3 - <<'PY'
+          import os, re, zipfile, hashlib
+          from pathlib import Path
+          apk = Path("work/target.apk")
+          decoded = Path("work/apktool-out")
+          out = Path("work/REPORT.md")
+          with zipfile.ZipFile(apk) as z:
+              names = z.namelist()
+          dex = [n for n in names if re.fullmatch(r"classes(?:\\d+)?\\.dex", n)]
+          libs = [n for n in names if n.startswith("lib/") and n.endswith(".so")]
+          assets = [n for n in names if n.startswith("assets/")]
+          res = [n for n in names if n.startswith("res/")]
+          manifest = decoded / "AndroidManifest.xml"
+          text = manifest.read_text(errors="replace") if manifest.exists() else ""
+          def tags(tag):
+              return sorted(set(re.findall(r"<"+tag+r"\\b[^>]*?\\bandroid:name=\"([^\"]+)\"", text)))
+          permissions = tags("uses-permission") + tags("uses-permission-sdk-23")
+          activities, services = tags("activity") + tags("activity-alias"), tags("service")
+          receivers, providers = tags("receiver"), tags("provider")
+          java_root = Path("work/jadx-out/sources")
+          java_files = list(java_root.rglob("*.java")) if java_root.exists() else []
+          packages = sorted({p.parent.relative_to(java_root).as_posix() for p in java_files if p.parent != java_root}) if java_root.exists() else []
+          lines = [
+            "# APK forensic report",
+            "",
+            f"- File: `{apk.name}`",
+            f"- Size: {apk.stat().st_size:,} bytes",
+            f"- SHA-256: `{hashlib.sha256(apk.read_bytes()).hexdigest()}`",
+            f"- ZIP entries: {len(names)}",
+            f"- DEX files: {len(dex)} ({', '.join(dex) if dex else 'none'})",
+            f"- Decompiled Java files: {len(java_files)}",
+            f"- Native libraries: {len(libs)}",
+            f"- Assets: {len(assets)}",
+            f"- Resource files: {len(res)}",
+            "",
+            "## Android permissions",
+            *([f"- `{x}`" for x in permissions] or ["- None parsed"]),
+            "",
+            "## App components",
+            f"- Activities: {len(activities)}",
+            *([f"  - `{x}`" for x in activities] or ["  - None parsed"]),
+            f"- Services: {len(services)}",
+            *([f"  - `{x}`" for x in services] or ["  - None parsed"]),
+            f"- Receivers: {len(receivers)}",
+            *([f"  - `{x}`" for x in receivers] or ["  - None parsed"]),
+            f"- Providers: {len(providers)}",
+            *([f"  - `{x}`" for x in providers] or ["  - None parsed"]),
+            "",
+            "## Native libraries",
+            *([f"- `{x}`" for x in libs] or ["- None"]),
+            "",
+            "## Asset paths (first 250)",
+            *([f"- `{x}`" for x in assets[:250]] or ["- None"]),
+            "",
+            "## Decompiled package roots (first 150)",
+            *([f"- `{x}`" for x in packages[:150]] or ["- None"]),
+            "",
+            "## Important notes",
+            "- JADX output is a best-effort reconstruction, not original source code.",
+            "- Obfuscation, native code, reflection and dynamically loaded modules may hide behavior.",
+            "- Review the decoded manifest, resources, DEX output and native libraries together.",
+          ]
+          out.write_text("\\n".join(lines) + "\\n")
+          print(out.read_text())
+          PY
+          cp work/apktool-out/AndroidManifest.xml work/AndroidManifest-decoded.xml
+          find work/apktool-out/res -maxdepth 2 -type f 2>/dev/null | head -300 > work/resource-index.txt || true
+          find work/jadx-out/sources -type f -name '*.java' | head -1000 > work/source-index.txt || true
+          zip -qr work/jadx-source.zip work/jadx-out/sources
+          zip -qr work/apktool-decode.zip work/apktool-out
+      - name: Upload analysis report and decoded sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-forensics-report
+          path: |
+            work/REPORT.md
+            work/AndroidManifest-decoded.xml
+            work/apk-contents.txt
+            work/resource-index.txt
+            work/source-index.txt
+            work/jadx-source.zip
+            work/apktool-decode.zip
+          retention-days: 14
