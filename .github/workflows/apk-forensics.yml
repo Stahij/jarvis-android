@@ -60,14 +60,14 @@ jobs:
           out = Path("work/REPORT.md")
           with zipfile.ZipFile(apk) as z:
               names = z.namelist()
-          dex = [n for n in names if re.fullmatch(r"classes(?:\\d+)?\\.dex", n)]
+          dex = [n for n in names if re.fullmatch(r"classes(?:\d+)?\.dex", n)]
           libs = [n for n in names if n.startswith("lib/") and n.endswith(".so")]
           assets = [n for n in names if n.startswith("assets/")]
           res = [n for n in names if n.startswith("res/")]
           manifest = decoded / "AndroidManifest.xml"
           text = manifest.read_text(errors="replace") if manifest.exists() else ""
           def tags(tag):
-              return sorted(set(re.findall(r"<"+tag+r"\\b[^>]*?\\bandroid:name=\"([^\"]+)\"", text)))
+              return sorted(set(re.findall(r"<"+tag+r"\b[^>]*?\bandroid:name=\"([^\"]+)\"", text)))
           permissions = tags("uses-permission") + tags("uses-permission-sdk-23")
           activities, services = tags("activity") + tags("activity-alias"), tags("service")
           receivers, providers = tags("receiver"), tags("provider")
