@@ -42,7 +42,14 @@ jobs:
           apktool d -f work/target.apk -o work/apktool-out
       - name: Decompile DEX code with JADX
         run: |
+          set +e
           work/jadx/bin/jadx --show-bad-code -d work/jadx-out work/target.apk
+          JADX_STATUS=$?
+          set -e
+          echo "JADX exit code: $JADX_STATUS"
+          # JADX may return exit code 3 after producing usable output for some
+          # classes. Keep partial results and continue the inventory.
+          test -d work/jadx-out/sources
       - name: Build technical inventory
         run: |
           python3 - <<'PY'
