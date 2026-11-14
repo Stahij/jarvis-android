@@ -1,7 +1,9 @@
-name: Build Jarvis Android APK
+name: Build Jarvis Launcher APK
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
+      - architecture/jarvis-launcher-foundation
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,7 +26,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Jarvis-Android-0.1.1-debug
+          name: Jarvis-Launcher-0.2.0-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
