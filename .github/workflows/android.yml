@@ -59,7 +59,7 @@ jobs:
           retention-days: 14
 
   release:
-    if: (github.event_name == 'workflow_dispatch' && (inputs.build_release || inputs.publish_release)) || startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/feature/local-brain-and-updater' || github.ref == 'refs/heads/feature/jarvis-1.5.3-output-speed-updater' || github.ref == 'refs/heads/feature/qwen-2.5-3b-instruct' || github.ref == 'refs/heads/feature/jarvis-1.5.5-prefill-updater' || startsWith(github.ref, 'refs/heads/release/') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/jarvis-1.5.5-prefill-updater')
+    if: (github.event_name == 'workflow_dispatch' && (inputs.build_release || inputs.publish_release)) || startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/feature/local-brain-and-updater' || github.ref == 'refs/heads/feature/jarvis-1.5.3-output-speed-updater' || github.ref == 'refs/heads/feature/qwen-2.5-3b-instruct' || github.ref == 'refs/heads/feature/jarvis-1.5.5-prefill-updater' || startsWith(github.ref, 'refs/heads/release/') || github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/jarvis-1.5.5-prefill-updater')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -142,18 +142,22 @@ jobs:
       # Keep the release branch suffix aligned with app/build.gradle.kts versionName.
       - name: Resolve release tag from app version
         id: release_tag
-        if: startsWith(github.ref, 'refs/heads/release/')
+        if: startsWith(github.ref, 'refs/heads/release/') || github.ref == 'refs/heads/main'
         run: |
           APP_VERSION="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n1)"
           BRANCH_VERSION="${GITHUB_REF_NAME#release/}"
           EXPECTED_TAG="v${APP_VERSION}"
-          if [ -z "$APP_VERSION" ] || { [ "$BRANCH_VERSION" != "$EXPECTED_TAG" ] && [ "$BRANCH_VERSION" != "$APP_VERSION" ]; }; then
+          if [ -z "$APP_VERSION" ]; then
+            echo "::error::Unable to read versionName from app/build.gradle.kts."
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/heads/release/* ]] && [ "$BRANCH_VERSION" != "$EXPECTED_TAG" ] && [ "$BRANCH_VERSION" != "$APP_VERSION" ]; then
             echo "::error::Release branch must be release/v<versionName> (or release/<versionName>)."
             exit 1
           fi
           echo "tag=$EXPECTED_TAG" >> "$GITHUB_OUTPUT"
       - name: Publish GitHub Release for in-app updates
-        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/') || github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag || steps.release_tag.outputs.tag || github.ref_name }}
