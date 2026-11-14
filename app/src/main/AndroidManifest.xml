@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -6,6 +7,13 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="true"
@@ -17,13 +25,18 @@
         <activity android:name=".GitHubAccessActivity" android:exported="false" />
         <activity android:name=".OnlineKnowledgeActivity" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="false" />
-        <activity android:name=".ChatHubActivity" android:exported="true">
+        <activity android:name=".ChatHubActivity" android:exported="false" />
+        <activity android:name=".LauncherActivity" android:exported="true" android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
         <service
             android:name=".OrbService"
             android:exported="false"
@@ -32,16 +45,8 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-enabled persistent floating Jarvis assistant overlay" />
         </service>
-
-        <receiver
-            android:name=".InstallResultReceiver"
-            android:enabled="true"
-            android:exported="false" />
-
-        <receiver
-            android:name=".BootReceiver"
-            android:enabled="true"
-            android:exported="true">
+        <receiver android:name=".InstallResultReceiver" android:enabled="true" android:exported="false" />
+        <receiver android:name=".BootReceiver" android:enabled="true" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
