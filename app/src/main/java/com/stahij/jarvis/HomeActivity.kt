@@ -24,6 +24,7 @@ class HomeActivity : Activity() {
     private val background = Color.rgb(5, 10, 22)
     private val panel = Color.rgb(12, 25, 42)
     private val cyan = Color.rgb(64, 231, 255)
+    private lateinit var homeRoot: LinearLayout
     private lateinit var appGrid: GridLayout
     private lateinit var search: EditText
     private lateinit var appCount: TextView
@@ -35,6 +36,7 @@ class HomeActivity : Activity() {
         window.navigationBarColor = background
         buildHome()
         loadApps()
+        ReleaseUpdateChecker(BuildConfig.VERSION_NAME) { version, notes, url -> showUpdateBanner(version, notes, url) }.check()
     }
 
     override fun onResume() {
@@ -43,12 +45,13 @@ class HomeActivity : Activity() {
     }
 
     private fun buildHome() {
-        val root = LinearLayout(this).apply {
+        homeRoot = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(22), dp(18), dp(12))
             setBackgroundColor(this@HomeActivity.background)
         }
 
+        val root = homeRoot
         val brand = TextView(this).apply {
             text = "J A R V I S"
             textSize = 25f
@@ -57,6 +60,33 @@ class HomeActivity : Activity() {
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
         }
         root.addView(brand)
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val gesturesButton = TextView(this).apply {
+            text = "НАСТРОЙКА ЖЕСТОВ"
+            textSize = 11f
+            setTextColor(cyan)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setOnClickListener { startActivity(Intent(this@HomeActivity, GestureSettingsActivity::class.java)) }
+        }
+        val homeButton = TextView(this).apply {
+            text = "ВЫБРАТЬ ГЛАВНЫЙ ЭКРАН"
+            textSize = 10f
+            setTextColor(Color.LTGRAY)
+            setPadding(dp(8), dp(12), dp(8), dp(12))
+            setOnClickListener {
+                try { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
+                catch (_: Exception) {
+                    Toast.makeText(this@HomeActivity, "Настройки → Приложения по умолчанию → Рабочий стол", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        actions.addView(gesturesButton, LinearLayout.LayoutParams(0, -2, 1f))
+        actions.addView(homeButton)
+        root.addView(actions)
 
         val subtitle = TextView(this).apply {
             text = "PERSONAL SYSTEM INTERFACE"
@@ -151,6 +181,23 @@ class HomeActivity : Activity() {
         }
         root.addView(footer)
         setContentView(root)
+    }
+
+    private fun showUpdateBanner(version: String, notes: String, url: String) {
+        val banner = TextView(this).apply {
+            text = "ДОСТУПНО ОБНОВЛЕНИЕ  v$version  ·  ОТКРЫТЬ РЕЛИЗ"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(cyan)
+            setPadding(dp(12), dp(14), dp(12), dp(14))
+            background = rounded(panel, dp(12), Color.rgb(26, 94, 117))
+            setOnClickListener {
+                try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+                catch (_: Exception) { Toast.makeText(this@HomeActivity, "Не удалось открыть страницу релиза", Toast.LENGTH_SHORT).show() }
+            }
+        }
+        homeRoot.addView(banner, 2)
+        Toast.makeText(this, "Для Jarvis доступна версия $version", Toast.LENGTH_LONG).show()
     }
 
     private fun loadApps() {
