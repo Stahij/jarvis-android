@@ -136,3 +136,53 @@ Do **not** turn the current chat `MainActivity` into the HOME activity in the fi
 The current local-model HTTP transport is an implementation detail behind an AI client interface, not a permanent dependency on Termux. First preserve it behind that interface so the app still works; then add an embedded local runtime or configurable remote provider as a separate tested backend. Do not remove the existing path until a replacement has passed device tests.
 
 Before adding Room or a large dependency set, inspect the full source tree and CI build workflow, then choose the smallest compatible dependency changes. The first launcher milestone should be a dedicated HOME activity, app listing/launch, and a persisted single-page grid; no HUD, AI migration or full widget host in that first milestone.
+
+
+## Confirmed product requirements — launcher UX and updates (2026-11-14)
+
+The user approved keeping the first installed 0.2.0 prototype in place and evolving it through in-app releases. Do not ask the user to uninstall/reinstall for ordinary updates. The current build is a prototype, not the final workspace design.
+
+### Xiaomi-style gesture navigation
+
+Gesture navigation is a core requirement, not an optional polish item. The user is accustomed to Xiaomi full-screen gestures and explicitly dislikes the three-button navigation bar.
+
+Respect the distinction between OS navigation and launcher workspace gestures:
+
+**System navigation — preserve Android/MIUI ownership**
+- Bottom-edge swipe up: Android/MIUI returns to Home; when Jarvis is the selected default HOME app, this naturally opens Jarvis.
+- Bottom-edge swipe up and hold: Android/MIUI opens Recents.
+- Side-edge swipe inward: Android/MIUI Back.
+- Do not draw replacement square/circle/triangle navigation buttons.
+- Do not intercept the OS-reserved bottom or side gesture regions. Keep compatibility with Xiaomi's gesture navigation settings and test on the user's Android 13 / MIUI device.
+- Jarvis cannot silently replace or fully reimplement privileged OS navigation. It should integrate as the default HOME app and let the system perform Home/Back/Recents.
+
+**Launcher workspace gestures — implement and make configurable**
+- Horizontal swipe left/right across the workspace: move between home pages.
+- Swipe up on the workspace: open the app drawer/search.
+- Swipe down on the workspace: configurable action; default may be notification shade only if a supported, user-authorized Android mechanism is available. Otherwise offer a safe alternative such as launcher search/quick panel.
+- Pinch on workspace: enter page/workspace overview or edit mode.
+- Long-press an icon/widget: drag, move, resize where supported, open item actions.
+- Double-tap empty workspace: configurable shortcut (default off until a safe screen-lock implementation is validated).
+- Optional configurable gestures: double-tap icon, two-finger swipe, and other non-conflicting workspace gestures.
+- A dedicated Gesture settings screen must show each gesture, its assigned action, enable/disable state and conflict explanation. Provide Xiaomi-like defaults and allow remapping.
+- Respect accessibility, touch exploration, reduced motion and OS edge-gesture zones. Avoid gesture conflicts with app icons, widgets, scrolling and system Back.
+
+### In-app release/update system
+
+- Keep application ID and signing identity stable. All release APKs must use one persistent signing key; never rely on ephemeral GitHub Actions debug keystores for upgrade builds.
+- Check GitHub Releases for a newer stable release (manual check plus periodic check when appropriate); do not treat prereleases/drafts as stable unless explicitly enabled.
+- Show an in-app update banner/notification with version, release notes and download/install action.
+- Download with progress, verify HTTPS response and APK package/version/signature before handing installation to Android.
+- Use Android's supported package installer flow; user confirmation is expected and required by Android. Do not promise silent installation.
+- Handle unknown-source install permission with a clear one-time explanation and route to the relevant Android settings.
+- Preserve workspace, preferences, chat history and local data across upgrades. Include rollback/recovery guidance for failed updates.
+- Do not overwrite the currently installed APK or alter signing configuration until the persistent release keystore and upgrade path have been validated on-device.
+
+### Acceptance checks for the next launcher milestone
+
+1. No three-button navigation bar is rendered by Jarvis; MIUI full-screen gestures remain active.
+2. Bottom-up Home, bottom-up-and-hold Recents and side-edge Back work through Android/MIUI without interception.
+3. Workspace page swipes and app-drawer swipe work without stealing OS edge gestures.
+4. Gesture settings can change assignments and persist them after restart.
+5. Release update installs over the previous Jarvis build with the same signing certificate and preserves user data.
+6. Update UI clearly distinguishes "downloaded" from "installed"; Android installer confirmation is not bypassed.
