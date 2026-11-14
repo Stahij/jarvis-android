@@ -1,0 +1,120 @@
+name: Launcher APK forensic analysis
+
+on:
+  push:
+    branches:
+      - analysis/launcher-forensics
+    paths:
+      - .github/workflows/launcher-forensics.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apktool unzip zip file jq
+      - name: Download and verify APK
+        run: |
+          mkdir -p work
+          curl -fL --retry 3 "https://github.com/Stahij/jarvis-android/releases/download/launcher-analysis-1/1793854735_jarvis-scifi-epic-launcher-v11_7-mod-5mod_ru.apk" -o work/target.apk
+          echo "4c509633d025948114d21035e6737c98703d899302cfb40fba883ad47d5f3763  work/target.apk" | sha256sum -c -
+          file work/target.apk
+          unzip -l work/target.apk > work/apk-contents.txt
+      - name: Install JADX
+        run: |
+          JADX_URL="$(curl -fsSL https://api.github.com/repos/skylot/jadx/releases/latest | jq -r '[.assets[] | select(.name | endswith(".zip"))][0].browser_download_url')"
+          test -n "$JADX_URL" && test "$JADX_URL" != "null"
+          curl -fL --retry 3 "$JADX_URL" -o work/jadx.zip
+          mkdir -p work/jadx
+          unzip -q work/jadx.zip -d work/jadx
+          chmod +x work/jadx/bin/jadx
+      - name: Decode resources and manifest
+        run: apktool d -f work/target.apk -o work/apktool-out
+      - name: Decompile DEX
+        run: |
+          set +e
+          work/jadx/bin/jadx --show-bad-code -d work/jadx-out work/target.apk
+          JADX_STATUS=$?
+          set -e
+          echo "JADX exit code: $JADX_STATUS"
+          test -d work/jadx-out/sources
+      - name: Build report and indexes
+        run: |
+          python3 - <<'PY'
+          import re, zipfile, hashlib
+          from pathlib import Path
+          apk = Path("work/target.apk")
+          decoded = Path("work/apktool-out")
+          with zipfile.ZipFile(apk) as z:
+              names = z.namelist()
+          dex = [n for n in names if re.fullmatch(r"classes(?:\d+)?\.dex", n)]
+          libs = [n for n in names if n.startswith("lib/") and n.endswith(".so")]
+          assets = [n for n in names if n.startswith("assets/")]
+          res = [n for n in names if n.startswith("res/")]
+          manifest = decoded / "AndroidManifest.xml"
+          mt = manifest.read_text(errors="replace") if manifest.exists() else ""
+          def tags(tag):
+              return sorted(set(re.findall(r"<"+tag+r"\b[^>]*?\bandroid:name=\"([^\"]+)\"", mt)))
+          perms = tags("uses-permission") + tags("uses-permission-sdk-23")
+          activities = tags("activity") + tags("activity-alias")
+          services, receivers, providers = tags("service"), tags("receiver"), tags("provider")
+          root = Path("work/jadx-out/sources")
+          java = list(root.rglob("*.java")) if root.exists() else []
+          packages = sorted({p.parent.relative_to(root).as_posix() for p in java if p.parent != root}) if root.exists() else []
+          lines = [
+            "# Jarvis Scifi Launcher — APK forensic report", "",
+            "- File: 1793854735_jarvis-scifi-epic-launcher-v11_7-mod-5mod_ru.apk",
+            f"- Size: {apk.stat().st_size:,} bytes",
+            f"- SHA-256: {hashlib.sha256(apk.read_bytes()).hexdigest()}",
+            "- Sample: user-provided MOD build; do not assume it matches the Play Store original.",
+            "- Static analysis only; the APK was not installed or executed.", "",
+            "## Package / build attributes",
+            *[f"- {k}: {v}" for k,v in re.findall(r'(package|android:versionName|android:versionCode|android:minSdkVersion|android:targetSdkVersion)=\"([^\"]+)\"', mt)],
+            f"- DEX files: {len(dex)} ({', '.join(dex)})",
+            f"- Decompiled Java files: {len(java)}",
+            f"- Native libraries: {len(libs)}",
+            f"- Assets: {len(assets)}",
+            f"- Resource files: {len(res)}", "",
+            "## Permissions", *([f"- {x}" for x in perms] or ["- None parsed"]), "",
+            "## Components",
+            f"- Activities ({len(activities)}):", *[f"  - {x}" for x in activities],
+            f"- Services ({len(services)}):", *[f"  - {x}" for x in services],
+            f"- Receivers ({len(receivers)}):", *[f"  - {x}" for x in receivers],
+            f"- Providers ({len(providers)}):", *[f"  - {x}" for x in providers], "",
+            "## Native libraries", *[f"- {x}" for x in libs], "",
+            "## Assets (first 300)", *[f"- {x}" for x in assets[:300]], "",
+            "## Resource directories", *[f"- {x}" for x in sorted({n.split('/')[1] for n in res if '/' in n})], "",
+            "## Decompiled package roots (first 200)", *[f"- {x}" for x in packages[:200]], "",
+            "## Limitations",
+            "- JADX output is reconstructed code, not the original source.",
+            "- MOD changes may affect code, resources, ads, licensing, or behavior.",
+            "- Obfuscation, native code, reflection and dynamic loading may hide behavior."
+          ]
+          Path("work/REPORT.md").write_text("\n".join(lines) + "\n")
+          print(Path("work/REPORT.md").read_text())
+          PY
+          cp work/apktool-out/AndroidManifest.xml work/AndroidManifest-decoded.xml
+          find work/apktool-out/res -maxdepth 3 -type f 2>/dev/null | head -1500 > work/resource-index.txt || true
+          find work/jadx-out/sources -type f -name '*.java' | head -5000 > work/source-index.txt || true
+          zip -qr work/jadx-source.zip work/jadx-out/sources
+          zip -qr work/apktool-decode.zip work/apktool-out
+      - name: Upload forensic artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-forensics-report
+          path: |
+            work/REPORT.md
+            work/AndroidManifest-decoded.xml
+            work/apk-contents.txt
+            work/resource-index.txt
+            work/source-index.txt
+            work/jadx-source.zip
+            work/apktool-decode.zip
+          retention-days: 14
