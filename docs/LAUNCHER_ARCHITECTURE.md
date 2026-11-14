@@ -118,3 +118,21 @@ Persist user workspace data in a versioned local database (Room is the preferred
 - Decide whether the existing MainActivity becomes HOME or a dedicated HomeActivity is safer.
 - Confirm existing app package/signing key and baseline APK install/update path.
 - Define target devices and minimum acceptable launcher performance.
+
+
+## Existing repository baseline (inspected before implementation)
+
+The current default branch is a very small native Kotlin MVP, not yet a launcher:
+- Gradle: Android Gradle Plugin 8.7.3, Kotlin Android 2.0.21, Java/Kotlin target 17.
+- App: namespace/applicationId `com.stahij.jarvis`, compileSdk 35, minSdk 26, targetSdk 35, versionCode 2 / versionName 0.1.1.
+- Current `MainActivity` is the chat screen and starts an optional floating `OrbService`; it is registered with MAIN/LAUNCHER only, not MAIN/HOME.
+- Current chat stores up to 40 messages in SharedPreferences JSON and calls an OpenAI-compatible endpoint at `http://127.0.0.1:8080/v1/chat/completions` (llama-server/Termux in the current implementation). It has a 120-second read timeout and explicitly reports a Termux/llama-server connection error.
+- The manifest currently requests INTERNET, overlay, boot and foreground-service permissions and declares the floating service/boot receiver.
+
+### Architectural decision for migration
+
+Do **not** turn the current chat `MainActivity` into the HOME activity in the first step. Keep it as the known-working assistant entry point and introduce a dedicated `HomeActivity` with HOME/DEFAULT intent filters. This isolates launcher lifecycle/default-home behavior from chat and overlay code, makes rollback easier, and avoids breaking the existing entry flow. The launcher can open the existing assistant screen until the new assistant surface is ready.
+
+The current local-model HTTP transport is an implementation detail behind an AI client interface, not a permanent dependency on Termux. First preserve it behind that interface so the app still works; then add an embedded local runtime or configurable remote provider as a separate tested backend. Do not remove the existing path until a replacement has passed device tests.
+
+Before adding Room or a large dependency set, inspect the full source tree and CI build workflow, then choose the smallest compatible dependency changes. The first launcher milestone should be a dedicated HOME activity, app listing/launch, and a persisted single-page grid; no HUD, AI migration or full widget host in that first milestone.
