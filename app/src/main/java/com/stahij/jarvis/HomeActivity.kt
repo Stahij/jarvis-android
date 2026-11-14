@@ -46,7 +46,7 @@ class HomeActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(22), dp(18), dp(12))
-            setBackgroundColor(background)
+            setBackgroundColor(this@HomeActivity.background)
         }
 
         val brand = TextView(this).apply {
@@ -94,7 +94,7 @@ class HomeActivity : Activity() {
             setHintTextColor(Color.rgb(105, 130, 150))
             setTextColor(Color.WHITE)
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             background = null
             setPadding(dp(10), 0, 0, 0)
             addTextChangedListener(object : TextWatcher {
