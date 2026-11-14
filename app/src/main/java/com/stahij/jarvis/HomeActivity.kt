@@ -18,8 +18,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 class HomeActivity : Activity() {
@@ -176,7 +174,7 @@ class HomeActivity : Activity() {
         }
 
         val columns = appGrid.columnCount.coerceAtLeast(1)
-        val width = (resources.displayMetrics.widthPixels - dp(36)) / columns
+        val cellWidth = (resources.displayMetrics.widthPixels - dp(36)) / columns
         filtered.forEachIndexed { index, info ->
             val tile = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -221,7 +219,7 @@ class HomeActivity : Activity() {
                 setPadding(0, dp(28), 0, dp(28))
             }
             appGrid.addView(empty, GridLayout.LayoutParams().apply {
-                width = width * columns
+                width = cellWidth * columns
                 height = dp(70)
             })
         }
